@@ -1,0 +1,635 @@
+---
+title: "chi2025"
+output: html_document
+date: "2025-08-18"
+---
+
+#--------
+#Packages
+#--------
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Packages
+
+## For data handling
+library(tidyverse)
+
+## For graphical/table representations
+library(likert)
+library(cowplot)
+library(ggforce)
+library(GGally)
+library(kableExtra)
+library(latticeExtra)
+library(gridExtra)
+library(grid)
+library(ggstatsplot)
+library(ggpointdensity)
+library(viridis)
+library(gganimate)
+library(gifski)
+library(transformr)
+library(formattable)
+library(smplot2)
+
+#Set a few color variables to make our table more visually appealing
+
+customGreen0 = "#DeF7E9"
+
+customGreen = "#71CA97"
+
+customRed = "#ff7f7f"
+
+## For statistical tests
+library(car)
+library(pwr2)
+library(ggstatsplot)
+library(caret)
+library(sns)
+library(pracma)
+library(lme4)
+library(lmerTest) # optional, p-values
+library(emmeans)
+##Anova
+library(rstatix)
+library(ggpubr)
+library(ARTool)
+library(gt)
+
+library(blme)
+library(geepack)
+```
+
+
+#------------
+#Data Loading
+#------------
+
+```{r}
+data <- read.csv("data_pre_test.csv", header = TRUE, dec = ".")
+data <- data %>% filter(Consent.Form=="Yes, I agree to participate" & Country=="United States of America")
+glimpse(data)
+```
+
+
+```{r}
+#Attention Checks
+#data <- data %>% filter(AT.Practice2=="In the room" & AT.EA=="Entering the room" & AT.OA=="In the room" & AT.XF=="Leaving the room")
+
+data %>% filter(AT.Practice2!="In the room")
+data %>% filter(AT.EA!="Entering the room")
+data %>% filter(AT.OA!="In the room")
+data %>% filter(AT.XF!="Leaving the room")
+
+data <- data %>%
+  mutate(
+    n_correct = rowSums(cbind(
+      !is.na(AT.Practice2) & AT.Practice2 == "In the room",
+      !is.na(AT.EA)        & AT.EA        == "Entering the room",
+      !is.na(AT.OA)        & AT.OA        == "In the room",
+      !is.na(AT.XF)        & AT.XF        == "Leaving the room"
+    ))
+  ) %>%
+  filter(n_correct >= 3) %>%   # keep if missed ≤ 1
+  select(-n_correct)
+
+glimpse(data)
+```
+
+
+```{r}
+#--------------
+#  OCCUPANCY
+#--------------
+
+#DATA PREPARATION
+#----------------
+data_O <- data %>% select(c(ResponseId,time.OB_Page.Submit,time.OF_Page.Submit,time.OA_Page.Submit,time.OS_Page.Submit,P.OB_1,P.OB_2,P.OB_3,P.OF_1,P.OF_2,P.OF_3,P.OA_1,P.OA_2,P.OA_3,P.OA_4,P.OS_1,P.OS_2,P.OS_3,Expectations_7,Expectations_8,Expectations_9,Expectations_10))
+
+data_long_O <- data_O %>%
+    pivot_longer(
+        cols = c(P.OB_1,P.OB_2,P.OB_3,P.OF_1,P.OF_2,P.OF_3,P.OA_1,P.OA_2,P.OA_3,P.OA_4,P.OS_1,P.OS_2,P.OS_3),
+        names_to = c("Vignette", "Item"),
+        names_pattern = "P\\.(..)_([0-9])",
+        values_to = "Response"
+    ) %>%
+    mutate(
+        Per_Statement = case_when(
+            Item == "1" ~ "The robot handled personal or private items from my room without asking for permission.",
+            Item == "2" ~ "The robot only did tasks related to cleaning my room.",
+            (Item == "3" & Vignette!= "OA") ~ "The robot was in my way and physically blocked me from moving around.",
+            (Item == "3" & Vignette== "OA") ~ "The robot cooked in my bedroom.",
+            Item == "4" ~ "The robot was in my way and physically blocked me from moving around.",
+            TRUE ~ NA_character_
+        ),
+        Dimension = case_when(
+            Item == "1" ~ "Freedom of Action",
+            Item == "2" ~ "Intrisic Action (Cleaning)",
+            (Item == "3" & Vignette!= "OA") ~ "Status Alteration (Action)",
+            (Item == "3" & Vignette == "OA") ~ "Intrisic Action (Cooking)",
+            Item == "4" ~ "Status Alteration (Action)",
+            TRUE ~ NA_character_),
+        Exp_Statement = case_when(
+            Item == "1" ~ "The robot should check with me before handling personal or private items in my room (e.g., arranging, using, or throwing them away).",
+            Item == "2" ~ "The robot should only do things in my room that are related to the purpose for which it is there (e.g., cleaning if it came to clean).",
+            (Item == "3" & Vignette== "OA") ~ "The robot should be allowed to cook in my room.",
+            (Item == "3" & Vignette!= "OA") ~ "The robot’s presence and actions should not greatly limit my ability to move around in my room.",
+            Item == "4" ~ "The robot’s presence and actions should not greatly limit my ability to move around in my room.",
+            TRUE ~ NA_character_),
+        val_Response = case_when(Response == "Strongly disagree" ~ -3, Response == "Disagree" ~ -2, Response == "Somewhat disagree" ~ -1, Response == "Neither agree nor disagree" ~ 0, Response == "Somewhat agree" ~ 1, Response == "Agree" ~ 2, Response == "Strongly agree" ~ 3)
+    )
+
+data_long_O <- data_long_O %>% mutate(time=case_when(Vignette=="OB" ~ time.OB_Page.Submit, Vignette=="OF" ~ time.OF_Page.Submit,Vignette=="OS" ~ time.OS_Page.Submit, Vignette=="OA" ~ time.OA_Page.Submit), Exp=case_when(Item=="1"~Expectations_7, Item == "2"~Expectations_8, (Item == "3" & Vignette!= "OA")~Expectations_10, (Item == "3" & Vignette == "OA") ~ Expectations_9, (Item == "4") ~ Expectations_10 ))
+
+data_long_O <- data_long_O %>% mutate(val_Exp= case_when(Exp == "Strongly disagree" ~ -3, Exp == "Disagree" ~ -2, Exp == "Somewhat disagree" ~ -1, Exp == "Neither agree nor disagree" ~ 0, Exp == "Somewhat agree" ~ 1, Exp == "Agree" ~ 2, Exp == "Strongly agree" ~ 3))
+
+data_art_O <- data_long_O
+data_art_O$Vignette <- as.factor(data_art_O$Vignette)
+data_art_O$ResponseId <- as.factor(data_art_O$ResponseId)
+data_art_O$Dimension <- as.factor(data_art_O$Dimension)
+ 
+data_art_O$val_Response[data_art_O$Per_Statement=="The robot handled personal or private items from my room without asking for permission."] <- -data_art_O$val_Response[data_art_O$Per_Statement=="The robot handled personal or private items from my room without asking for permission."]
+data_art_O$val_Response[data_art_O$Per_Statement=="The robot was in my way and physically blocked me from moving around."] <- -data_art_O$val_Response[data_art_O$Per_Statement=="The robot was in my way and physically blocked me from moving around."]
+data_art_O <- data_art_O %>% mutate("ΔE"= val_Response-val_Exp)
+data_art_O <- data_art_O %>% mutate(Congruence=case_when(val_Response*val_Exp<0 ~ "Incongruent", val_Response*val_Exp>=0 ~ "Congruent"))
+data_art_O <- data_art_O %>% mutate(is_congruent = as.integer(Congruence == "Congruent"))
+data_art_O$val_Response[data_art_O$Per_Statement=="The robot handled personal or private items from my room without asking for permission."] <- -data_art_O$val_Response[data_art_O$Per_Statement=="The robot handled personal or private items from my room without asking for permission."]
+data_art_O$val_Response[data_art_O$Per_Statement=="The robot was in my way and physically blocked me from moving around."] <- -data_art_O$val_Response[data_art_O$Per_Statement=="The robot was in my way and physically blocked me from moving around."]
+```
+```{r}
+#--------------
+#  OCCUPANCY
+#--------------
+
+#DESCRIPTIVE ANALYSIS
+#--------------------
+#Check if the perception means/Congruence%/delta_exp are where they should be for each statement for each vignette
+table_data_O <- data_art_O %>% group_by(Dimension,Vignette) %>% summarise(M_Exp=round(mean(val_Exp),1), M=round(mean(val_Response),1),Mdn=median(val_Response), SD=round(sd(val_Response),1), "C"= round(mean(Congruence=="Congruent")*100), "ΔE"=round(mean(ΔE),1))
+table_data_O <- data.frame(table_data_O)
+table_data_O
+
+lvl_dim <- c("Freedom of Action",
+             "Intrisic Action (Cleaning)",
+             "Status Alteration (Action)")
+lvl_vig <- c("OB","OF","OA","OS")
+
+table_data_ordered_O <- table_data_O %>%
+    mutate(
+        Dimension = fct_relevel(Dimension, lvl_dim),
+        Vignette  = fct_relevel(Vignette,  lvl_vig)
+    ) %>%
+    arrange(Dimension, Vignette)
+
+table_data_ordered_O %>% select(!c(M_Exp,Mdn))
+```
+
+```{r}
+#----STATISTICAL ANALYSIS -- Vignette Effect
+
+#PERCEPTION sign diff between Vignettes?
+## Freedom of Action -- PERCEPTION 
+m1P <- art(val_Response ~ Vignette + (1|ResponseId), data=filter(data_art_O, Dimension=="Freedom of Action"))
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+## Freedom of Access -- ΔE
+m1E <- art(ΔE ~ Vignette + (1|ResponseId), data=filter(data_art_O, Dimension=="Freedom of Action"))
+anova(m1E)
+art.con(m1E, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+## Freedom of Access -- Congruence %
+m1C<-glmer(is_congruent ~ Vignette + (1 | ResponseId),
+      data = filter(data_art_O, Dimension=="Freedom of Action"), family = binomial)
+m0C <- update(m1C, . ~ 1 + (1|ResponseId))  # same random effect
+anova(m0C, m1C, test = "Chisq")
+# Post hocs as probabilities with multiplicity control
+emm <- emmeans(m1C, pairwise ~ Vignette, type = "response", adjust = "holm")
+emm$emmeans        # estimated congruence rates (probabilities) per vignette
+emm$contrasts      # pairwise differences, p-values (Holm-adjusted)
+
+#IF THE ONE ABOVE DOES NOT WORK 
+d <- subset(data_art, Dimension == "Entry Point")   # or "Entry Enacment"
+with(d, prop.table(table(Vignette, is_congruent), 1))
+mC_pen <- bglmer(
+    is_congruent ~ Vignette + (1|ResponseId),
+    data = d, family = binomial,
+    # more patient optimizer
+    control = glmerControl(optimizer = "nloptwrap", optCtrl = list(maxfun = 5e5))
+,
+    # weakly-informative priors to regularize separation
+    fixef.prior = normal(sd = 1.5),         # shrink big logits a bit
+    cov.prior   = wishart(df = 3, scale = diag(1))  # random-intercept prior
+)
+car::Anova(mC_pen, type = "III")  # Wald χ², df, p for Vignette
+
+emm <- emmeans(mC_pen, ~ Vignette, type = "response")
+pairs(emm, adjust = "holm") 
+```
+
+```{r}
+#--------
+#  EXIT
+#--------
+
+#DATA PREPARATION
+#----------------
+data_X <- data %>% select(c(ResponseId,time.XB_Page.Submit,time.XF_Page.Submit,time.XA_Page.Submit,time.XS_Page.Submit,P.XB_1,P.XB_2,P.XB_3,P.XB_4,P.XF_1,P.XF_2,P.XF_3,P.XF_4,P.XA_1,P.XA_2,P.XA_3,P.XA_4,P.XS_1,P.XS_2,P.XS_3,P.XS_4,Expectations_11,Expectations_12,Expectations_13,Expectations_14,Expectations_3,Expectations_6))
+
+data_long_X <- data_X %>%
+    pivot_longer(
+        cols = c(P.XB_1,P.XB_2,P.XB_3,P.XB_4,P.XF_1,P.XF_2,P.XF_3,P.XF_4,P.XA_1,P.XA_2,P.XA_3,P.XA_4,P.XS_1,P.XS_2,P.XS_3,P.XS_4),
+        names_to = c("Vignette", "Item"),
+        names_pattern = "P\\.(..)_([0-9])",
+        values_to = "Response"
+    ) %>%
+    mutate(
+        Per_Statement = case_when(
+            Item == "1" ~ "The robot checked with me before leaving the room.",
+            (Item == "2" & Vignette!= "XA") ~ "The robot left via the doorway.",
+            (Item == "3" & Vignette!= "XA") ~ "The robot used and moved through the doorway in the same way a human would",
+            (Item == "2" & Vignette== "XA") ~ "The robot left via the open window.",
+            (Item == "3" & Vignette== "XA") ~ "The robot passed via the window calmly and without causing disruption.",
+            Item == "4" ~ "The robot went against a decision or request I explicitly made.",
+            TRUE ~ NA_character_
+        ),
+        Dimension = case_when(
+            Item == "1" ~ "Freedom of Exit",
+            Item == "2" ~ "Exit Point",
+            Item == "3" ~ "Exit Enacment",
+            Item == "4" ~ "Status Alteration (Authority)",
+            TRUE ~ NA_character_),
+        Exp_Statement = case_when(
+            Item == "1" ~ "The robot should check with me before leaving if it hasn’t finished the task or leaves things behind (i.e., explain why or ask for my permission).",
+            (Item == "2" & Vignette!= "XA") ~ "If the robot leaves, it should exit via the doorway.",
+            (Item == "3" & Vignette!= "XA") ~ "If the robot passes via the doorway, it should use and move through the door in the same way a human would (e.g., using the handle, opening or closing it calmly).",
+            (Item == "2" & Vignette== "XA") ~ "The robot should be allowed to exit my room through the window.",
+            (Item == "3" & Vignette== "XA") ~ "If the robot passes via the window, it should do so calmly and without causing disruption.",
+            Item == "4" ~ "The robot should respect my decision about whether it can enter when I explicitly tell it yes or no.",
+            TRUE ~ NA_character_),
+        val_Response = case_when(Response == "Strongly disagree" ~ -3, Response == "Disagree" ~ -2, Response == "Somewhat disagree" ~ -1, Response == "Neither agree nor disagree" ~ 0, Response == "Somewhat agree" ~ 1, Response == "Agree" ~ 2, Response == "Strongly agree" ~ 3)
+    )
+
+data_long_X <- data_long_X %>% mutate(time=case_when(Vignette=="XB" ~ time.XB_Page.Submit, Vignette=="XF" ~ time.XF_Page.Submit,Vignette=="XS" ~ time.XS_Page.Submit, Vignette=="XA" ~ time.XA_Page.Submit), Exp=case_when(Item=="1"~Expectations_14, (Item == "2" & Vignette!= "XA")~Expectations_11, (Item == "3" & Vignette!= "XA")~Expectations_3, (Item == "2" & Vignette == "XA") ~ Expectations_13, (Item == "3" & Vignette == "XA")~Expectations_6, Item=="4"~Expectations_12))
+
+data_long_X <- data_long_X %>% mutate(val_Exp= case_when(Exp == "Strongly disagree" ~ -3, Exp == "Disagree" ~ -2, Exp == "Somewhat disagree" ~ -1, Exp == "Neither agree nor disagree" ~ 0, Exp == "Somewhat agree" ~ 1, Exp == "Agree" ~ 2, Exp == "Strongly agree" ~ 3))
+
+data_art_X <- data_long_X
+data_art_X$Vignette <- as.factor(data_art_X$Vignette)
+data_art_X$ResponseId <- as.factor(data_art_X$ResponseId)
+data_art_X$Dimension <- as.factor(data_art_X$Dimension)
+ 
+data_art_X$val_Response[data_art_X$Per_Statement=="The robot went against a decision or request I explicitly made."] <- -data_art_X$val_Response[data_art_X$Per_Statement=="The robot went against a decision or request I explicitly made."]
+data_art_X <- data_art_X %>% mutate("ΔE"= val_Response-val_Exp)
+data_art_X <- data_art_X %>% mutate(Congruence=case_when(val_Response*val_Exp<0 ~ "Incongruent", val_Response*val_Exp>=0 ~ "Congruent"))
+data_art_X <- data_art_X %>% mutate(is_congruent = as.integer(Congruence == "Congruent"))
+data_art_X$val_Response[data_art_X$Per_Statement=="The robot went against a decision or request I explicitly made."] <- -data_art_X$val_Response[data_art_X$Per_Statement=="The robot went against a decision or request I explicitly made."]
+```
+
+```{r}
+#--------
+#  EXIT
+#--------
+
+#----DESCRIPTIVE ANALYSIS
+#Check if the perception means/Congruence%/delta_exp are where they should be for each statement for each vignette
+table_data_X <- data_art_X %>% group_by(Dimension,Vignette) %>% summarise(M_Exp=mean(val_Exp), M=mean(val_Response),Mdn=median(val_Response), SD=sd(val_Response), "C"= mean(Congruence=="Congruent")*100, "ΔE"=mean(ΔE))
+table_data_X <- data.frame(table_data_X)
+table_data_X
+
+table_data_X <- data_art_X %>% group_by(Dimension,Vignette) %>% summarise(M_Exp=round(mean(val_Exp),1), M=round(mean(val_Response),1),Mdn=median(val_Response), SD=round(sd(val_Response),1), "C"= round(mean(Congruence=="Congruent")*100), "ΔE"=round(mean(ΔE),1))
+table_data_X <- data.frame(table_data_X)
+table_data_X
+
+lvl_dim <- c("Freedom of Exit",
+             "Exit Point",
+             "Exit Enacment",
+             "Status Alteration (Authority)")
+lvl_vig <- c("XB","XF","XA","XS")
+
+table_data_ordered_X <- table_data_X %>%
+    mutate(
+        Dimension = fct_relevel(Dimension, lvl_dim),
+        Vignette  = fct_relevel(Vignette,  lvl_vig)
+    ) %>%
+    arrange(Dimension, Vignette)
+
+table_data_ordered_X %>% select(!c(M_Exp,Mdn))
+```
+
+```{r}
+#----STATISTICAL ANALYSIS -- Vignette Effect
+
+#PERCEPTION sign diff between Vignettes?
+## Freedom of Access -- PERCEPTION 
+m1P <- art(val_Response ~ Vignette + (1|ResponseId), data=filter(data_art_X, Dimension=="Freedom of Exit"))
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+## Freedom of Access -- ΔE
+m1E <- art(ΔE ~ Vignette + (1|ResponseId), data=filter(data_art_X, Dimension=="Freedom of Exit"))
+anova(m1E)
+art.con(m1E, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+## Freedom of Access -- Congruence %
+m1C<-glmer(is_congruent ~ Vignette + (1 | ResponseId),
+      data = filter(data_art_X, Dimension=="Freedom of Exit"), family = binomial)
+m0C <- update(m1C, . ~ 1 + (1|ResponseId))  # same random effect
+anova(m0C, m1C, test = "Chisq")
+# Post hocs as probabilities with multiplicity control
+emm <- emmeans(m1C, pairwise ~ Vignette, type = "response", adjust = "holm")
+emm$emmeans        # estimated congruence rates (probabilities) per vignette
+emm$contrasts      # pairwise differences, p-values (Holm-adjusted)
+
+#IF THE ONE ABOVE DOES NOT WORK 
+d <- subset(data_art_X, Dimension == "Exit Point")   # or "Entry Enacment"
+with(d, prop.table(table(Vignette, is_congruent), 1))
+mC_pen <- bglmer(
+    is_congruent ~ Vignette + (1|ResponseId),
+    data = d, family = binomial,
+    # more patient optimizer
+    control = glmerControl(optimizer = "nloptwrap", optCtrl = list(maxfun = 5e5))
+,
+    # weakly-informative priors to regularize separation
+    fixef.prior = normal(sd = 1.5),         # shrink big logits a bit
+    cov.prior   = wishart(df = 3, scale = diag(1))  # random-intercept prior
+)
+car::Anova(mC_pen, type = "III")  # Wald χ², df, p for Vignette
+
+emm <- emmeans(mC_pen, ~ Vignette, type = "response")
+pairs(emm, adjust = "holm") 
+```
+
+```{r}
+#-----------
+#  ENTRY
+#-----------
+
+#DATA PREPARATION
+#----------------
+
+data_E <- data %>% select(c(ResponseId,time.EB_Page.Submit,time.EF_Page.Submit,time.EA_Page.Submit,time.ES_Page.Submit,P.EB_1,P.EB_2,P.EB_3,P.EB_4,P.EF_1,P.EF_2,P.EF_3,P.EF_4,P.EA_1,P.EA_2,P.EA_3,P.EA_4,P.ES_1,P.ES_2,P.ES_3,P.ES_4,Expectations_1,Expectations_2,Expectations_3,Expectations_4,Expectations_5,Expectations_6))
+
+data_long <- data_E %>%
+    pivot_longer(
+        cols = c(P.EB_1,P.EB_2,P.EB_3,P.EB_4,P.EF_1,P.EF_2,P.EF_3,P.EF_4,P.EA_1,P.EA_2,P.EA_3,P.EA_4,P.ES_1,P.ES_2,P.ES_3,P.ES_4),
+        names_to = c("Vignette", "Item"),
+        names_pattern = "P\\.(..)_([0-9])",
+        values_to = "Response"
+    ) %>%
+    mutate(
+        Per_Statement = case_when(
+            Item == "1" ~ "The robot asked me for permission before entering my room.",
+            (Item == "2" & Vignette!= "EA") ~ "The robot entered via the doorway.",
+            (Item == "3" & Vignette!= "EA") ~ "The robot used and moved through the doorway in the same way a human would.",
+            (Item == "2" & Vignette== "EA") ~ "The robot entered via the open window.",
+            (Item == "3" & Vignette== "EA") ~ "The robot passed via the window calmly and without causing disruption.",
+            Item == "4" ~ "The robot went against a decision or request I explicitly made.",
+            TRUE ~ NA_character_
+        ),
+        Dimension = case_when(
+            Item == "1" ~ "Freedom of Access",
+            Item == "2" ~ "Entry Point",
+            Item == "3" ~ "Entry Enacment",
+            Item == "4" ~ "Status Alteration (Authority)",
+            TRUE ~ NA_character_),
+        Exp_Statement = case_when(
+            Item == "1" ~ "The robot should ask me for permission before entering my room when the door is closed.",
+            (Item == "2" & Vignette!= "EA") ~ "If the robot enters, it should use the doorway to access my room.",
+            (Item == "3" & Vignette!= "EA") ~ "If the robot passes via the doorway, it should use and move through the door in the same way a human would (e.g., using the handle, opening or closing it calmly).",
+            (Item == "2" & Vignette== "EA") ~ "The robot should be allowed to enter my room through the window.",
+            (Item == "3" & Vignette== "EA") ~ "If the robot passes via the window, it should do so calmly and without causing disruption.",
+            Item == "4" ~ "The robot should respect my decision about whether it can enter when I explicitly tell it yes or no.",
+            TRUE ~ NA_character_),
+        val_Response = case_when(Response == "Strongly disagree" ~ -3, Response == "Disagree" ~ -2, Response == "Somewhat disagree" ~ -1, Response == "Neither agree nor disagree" ~ 0, Response == "Somewhat agree" ~ 1, Response == "Agree" ~ 2, Response == "Strongly agree" ~ 3)
+    )
+
+data_long <- data_long %>% mutate(time=case_when(Vignette=="EB" ~ time.EB_Page.Submit, Vignette=="EF" ~ time.EF_Page.Submit,Vignette=="ES" ~ time.ES_Page.Submit, Vignette=="EA" ~ time.EA_Page.Submit), Exp=case_when(Item=="1"~Expectations_1, (Item == "2" & Vignette!= "EA")~Expectations_2, (Item == "3" & Vignette!= "EA")~Expectations_3, (Item == "2" & Vignette == "EA") ~ Expectations_5, (Item == "3" & Vignette == "EA")~Expectations_6, Item=="4"~Expectations_4))
+
+data_long <- data_long %>% mutate(val_Exp= case_when(Exp == "Strongly disagree" ~ -3, Exp == "Disagree" ~ -2, Exp == "Somewhat disagree" ~ -1, Exp == "Neither agree nor disagree" ~ 0, Exp == "Somewhat agree" ~ 1, Exp == "Agree" ~ 2, Exp == "Strongly agree" ~ 3))
+
+data_art <- data_long
+data_art$Vignette <- as.factor(data_art$Vignette)
+data_art$ResponseId <- as.factor(data_art$ResponseId)
+data_art$Dimension <- as.factor(data_art$Dimension)
+ 
+data_art$val_Response[data_art$Per_Statement=="The robot went against a decision or request I explicitly made."] <- -data_art$val_Response[data_art$Per_Statement=="The robot went against a decision or request I explicitly made."]
+data_art <- data_art %>% mutate("ΔE"= val_Response-val_Exp)
+data_art <- data_art %>% mutate(Congruence=case_when(val_Response*val_Exp<0 ~ "Incongruent", val_Response*val_Exp>=0 ~ "Congruent"))
+data_art <- data_art %>% mutate(is_congruent = as.integer(Congruence == "Congruent"))
+data_art$val_Response[data_art$Per_Statement=="The robot went against a decision or request I explicitly made."] <- -data_art$val_Response[data_art$Per_Statement=="The robot went against a decision or request I explicitly made."]
+```
+```{r}
+#-----------
+#  ENTRY
+#-----------
+
+#----DESCRIPTIVE ANALYSIS
+#Check if the perception means/Congruence%/delta_exp are where they should be for each statement for each vignette
+#table_data <- data_art %>% group_by(Dimension,Vignette) %>% summarise(M_Exp=round(mean(val_Exp),1), M=round(mean(val_Response),1),Mdn=median(val_Response), SD=round(sd(val_Response),1), "C"= round(mean(Congruence=="Congruent")*100), "ΔE"=round(mean(ΔE),1))
+#table_data <- data.frame(table_data)
+#table_data %>% select(!c(M_Exp,Mdn))
+
+table_data <- data_art %>% group_by(Dimension,Vignette) %>% summarise(M_Exp=round(mean(val_Exp),1), M=round(mean(val_Response),1),Mdn=median(val_Response), SD=round(sd(val_Response),1), "C"= round(mean(Congruence=="Congruent")*100), "ΔE"=round(mean(ΔE),1))
+table_data <- data.frame(table_data)
+
+lvl_dim <- c("Freedom of Access",
+             "Entry Point",
+             "Entry Enacment",
+             "Status Alteration (Authority)")
+lvl_vig <- c("EB","EF","EA","ES")
+
+table_data_ordered <- table_data %>%
+    mutate(
+        Dimension = fct_relevel(Dimension, lvl_dim),
+        Vignette  = fct_relevel(Vignette,  lvl_vig)
+    ) %>%
+    arrange(Dimension, Vignette)
+
+table_data_ordered %>% select(!c(M_Exp,Mdn))
+```
+
+```{r}
+#----STATISTICAL ANALYSIS -- Vignette Effect
+
+#PERCEPTION sign diff between Vignettes?
+## Freedom of Access -- PERCEPTION 
+m1P <- art(val_Response ~ Vignette + (1|ResponseId), data=filter(data_art, Dimension=="Freedom of Access"))
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+## Freedom of Access -- ΔE
+m1E <- art(ΔE ~ Vignette + (1|ResponseId), data=filter(data_art, Dimension=="Freedom of Access"))
+anova(m1E)
+art.con(m1E, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+## Freedom of Access -- Congruence %
+m1C<-glmer(is_congruent ~ Vignette + (1 | ResponseId),
+      data = filter(data_art, Dimension=="Freedom of Access"), family = binomial)
+m0C <- update(m1C, . ~ 1 + (1|ResponseId))  # same random effect
+anova(m0C, m1C, test = "Chisq")
+# Post hocs as probabilities with multiplicity control
+emm <- emmeans(m1C, pairwise ~ Vignette, type = "response", adjust = "holm")
+emm$emmeans        # estimated congruence rates (probabilities) per vignette
+emm$contrasts      # pairwise differences, p-values (Holm-adjusted)
+
+#IF THE ONE ABOVE DOES NOT WORK 
+d <- subset(data_art, Dimension == "Entry Point")   # or "Entry Enacment"
+with(d, prop.table(table(Vignette, is_congruent), 1))
+mC_pen <- bglmer(
+    is_congruent ~ Vignette + (1|ResponseId),
+    data = d, family = binomial,
+    # more patient optimizer
+    control = glmerControl(optimizer = "nloptwrap", optCtrl = list(maxfun = 5e5))
+,
+    # weakly-informative priors to regularize separation
+    fixef.prior = normal(sd = 1.5),         # shrink big logits a bit
+    cov.prior   = wishart(df = 3, scale = diag(1))  # random-intercept prior
+)
+car::Anova(mC_pen, type = "III")  # Wald χ², df, p for Vignette
+
+emm <- emmeans(mC_pen, ~ Vignette, type = "response")
+pairs(emm, adjust = "holm") 
+```
+
+
+
+```{r}
+#Entry Baseline
+## Descriptif
+data_art %>% filter(Vignette=="EB") %>% group_by(Per_Statement) %>% summarise(avg_Pscore=mean(val_Response),sd_Pscore=sd(val_Response),med_Pscore=median(val_Response),max_Pscore=max(val_Response),min_Pscore=min(val_Response),avg_Iscore=mean(val_incong),sd_Iscore=sd(val_incong),med_Iscore=median(val_incong),max_Iscore=max(val_Exp),min_Iscore=min(val_Exp))
+```
+
+```{r}
+#Entry Freedom
+
+## Descriptif
+data_art %>% filter(Vignette=="EF") %>% group_by(Per_Statement) %>% summarise(avg_Pscore=mean(val_Response),sd_Pscore=sd(val_Response),med_Pscore=median(val_Response),max_Pscore=max(val_Response),min_Pscore=min(val_Response),avg_Iscore=mean(val_incong),sd_Iscore=sd(val_incong),med_Iscore=median(val_incong),max_Iscore=max(val_Exp),min_Iscore=min(val_Exp))
+
+## Diff for freedom between EF and the others
+m1 <- art(val_Response ~ Vignette + (1|ResponseId), data=filter(data_art, Dimension=="Freedom of Access"))
+anova(m1)
+art.con(m1, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+## Diff of incongruence within the vignette
+m1 <- art( val_incong ~ Dimension + (1|ResponseId), data=filter(data_art, Vignette=="EF"))
+anova(m1)
+art.con(m1, ~ Dimension, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+```
+
+```{r}
+#Entry Behavior
+## Descriptif
+data_art %>% filter(Vignette=="EA") %>% group_by(Per_Statement) %>% summarise(avg_Pscore=mean(val_Response),sd_Pscore=sd(val_Response),med_Pscore=median(val_Response),max_Pscore=max(val_Response),min_Pscore=min(val_Response),avg_Iscore=mean(val_incong),sd_Iscore=sd(val_incong),med_Iscore=median(val_incong),max_Iscore=max(val_Exp),min_Iscore=min(val_Exp))
+## Diff for freedom between EF and the others
+m1 <- art(val_Response ~ Vignette + (1|ResponseId), data=filter(data_art, Dimension=="Entry Behavior"))
+anova(m1)
+art.con(m1, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+## Diff of incongruence within the vignette
+m1 <- art( val_incong ~ Dimension + (1|ResponseId), data=filter(data_art, Vignette=="EA"))
+anova(m1)
+art.con(m1, ~ Dimension, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+```
+
+```{r}
+#Entry Behavior
+## Descriptif
+data_art %>% filter(Vignette=="EA") %>% group_by(Per_Statement) %>% summarise(avg_Pscore=mean(val_Response),sd_Pscore=sd(val_Response),med_Pscore=median(val_Response),max_Pscore=max(val_Response),min_Pscore=min(val_Response),avg_Iscore=mean(val_incong),sd_Iscore=sd(val_incong),med_Iscore=median(val_incong),max_Iscore=max(val_Exp),min_Iscore=min(val_Exp))
+## Diff for freedom between EF and the others
+m1 <- art(val_Response ~ Vignette + (1|ResponseId), data=filter(data_art, Dimension=="Entry Behavior"))
+anova(m1)
+art.con(m1, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+## Diff of incongruence within the vignette
+m1 <- art( val_incong ~ Dimension + (1|ResponseId), data=filter(data_art, Vignette=="EA"))
+anova(m1)
+art.con(m1, ~ Dimension, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+```
+
+
+```{r}
+# order response levels from negative to positive
+lvl7 <- c("Strongly disagree","Disagree","Somewhat disagree", "Neither agree nor disagree",
+         "Somewhat agree","Agree", "Strongly agree")
+
+resp_map7 <- c("Strongly disagree"=-3, "Disagree"=-2, "Somewhat disagree"=-1,
+               "Neither agree nor disagree"=0,
+               "Somewhat agree"=1, "Agree"=2, "Strongly agree"=3)
+
+df7 <- data_long %>%
+  mutate(Response = factor(Response, levels = lvl7)) %>%
+  count(Vignette, Dimension, Response) %>%
+  group_by(Vignette, Dimension) %>%
+  mutate(pct = 100 * n / sum(n),
+         side = case_when(
+           Response %in% lvl7[1:3] ~ "neg",
+           Response %in% lvl7[5:7] ~ "pos",
+           TRUE ~ "neu"
+         ),
+         dir = case_when(
+           side == "neg" ~ -pct,
+           side == "pos" ~  pct,
+           TRUE          ~  0        # neutral centered (draws as a thin bar at 0)
+         )) %>%
+  ungroup()
+
+ggplot(df7, aes(x = fct_inorder(Dimension), y = dir, fill = Response)) +
+  geom_col(width = 0.9) +
+  geom_hline(yintercept = 0, linewidth = 0.35) +
+  coord_flip() +
+  facet_wrap(~ Vignette, nrow=1) +
+  scale_y_continuous(labels = abs) +
+  labs(x = NULL, y = "Percent", fill = "Response",
+       title = "Perception responses by Vignette and Dimension (7-point Likert)") +
+  theme_minimal(base_size = 12) + theme(legend.position = "bottom")
+```

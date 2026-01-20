@@ -1,0 +1,1846 @@
+---
+title: "chi2025"
+output: html_document
+date: "2025-08-18"
+---
+
+#--------
+#Packages
+#--------
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Packages
+
+## For data handling
+library(tidyverse)
+
+## For graphical/table representations
+library(likert)
+library(cowplot)
+library(ggforce)
+library(GGally)
+library(kableExtra)
+library(latticeExtra)
+library(gridExtra)
+library(grid)
+library(ggstatsplot)
+library(ggpointdensity)
+library(viridis)
+library(gganimate)
+library(gifski)
+library(transformr)
+library(formattable)
+library(smplot2)
+
+#Set a few color variables to make our table more visually appealing
+
+customGreen0 = "#DeF7E9"
+
+customGreen = "#71CA97"
+
+customRed = "#ff7f7f"
+
+## For statistical tests
+library(car)
+library(pwr2)
+library(ggstatsplot)
+library(caret)
+library(sns)
+library(pracma)
+library(lme4)
+library(lmerTest) # optional, p-values
+library(emmeans)
+library(brglm2)
+##Anova
+library(rstatix)
+library(ggpubr)
+library(ARTool)
+library(gt)
+
+library(blme)
+library(geepack)
+```
+
+
+#------------
+#Data Loading
+#------------
+
+```{r}
+data <- read.csv("data_main.csv", header = TRUE, dec = ".")
+data <- data %>% filter(Consent.Form=="Yes, I agree to participate" & country=="United States of America")
+glimpse(data)
+```
+
+
+```{r}
+#Attention Checks
+data %>% filter(Q158_5!="Likely")
+data %>% filter(B.EB_5!="Somewhat likely")
+data %>% filter(P.OB_4!="Strongly agree")
+data %>% filter(D.XB_4!="Much worse than expected")
+data %>% filter(expectations_15!="Strongly disagree")
+
+data <- data %>%
+  mutate(
+    n_correct = rowSums(cbind(
+      !is.na(Q158_5) & Q158_5=="Likely",
+      !is.na(B.EB_5) & B.EB_5=="Somewhat likely",
+      !is.na(P.OB_4) & P.OB_4=="Strongly agree",
+      !is.na(D.XB_4) & D.XB_4=="Much worse than expected",
+      !is.na(expectations_15) & expectations_15=="Strongly disagree"
+    ))
+  ) %>%
+  filter(n_correct >= 3) %>%   # keep if missed ≤ 1
+  select(-n_correct)
+
+glimpse(data)
+```
+
+```{r}
+data_check <- data %>%
+  mutate(
+    n_correct = rowSums(cbind(
+      !is.na(Q158_5) & Q158_5=="Likely",
+      !is.na(B.EB_5) & B.EB_5=="Somewhat likely",
+      !is.na(P.OB_4) & P.OB_4=="Strongly agree",
+      !is.na(D.XB_4) & D.XB_4=="Much worse than expected",
+      !is.na(expectations_15) & expectations_15=="Strongly disagree"
+    ))
+  )
+
+data_check <- data_check %>%  
+
+```
+
+```{r}
+data_T <- data %>% select(TS.SF_1:TS.SF_6) %>% pivot_longer(cols = c(TS.SF_1:TS.SF_6),names_to = "Item" ,values_to = "Score")
+  
+  
+data_T <- data_T %>% mutate(Score=case_when(Score=="Not at all"~1, Score=="2"~2,Score=="3"~3,Score=="5"~5,Score=="6"~6, Score=="Very much"~7,Score=="Somewhat true"~4))
+summary(data_T)
+summarise(data_T, mean=mean(Score), sd=sd(Score))
+```
+
+```{r}
+data_demo <- data %>% mutate(Condition=case_when((P.EB_1!="" & P.OB_1!="" & P.XB_1!="")~"Baseline", P.EF_1!=""~"EF", P.EA_1!=""~"EA",P.ES_1!=""~"ES",P.OF_1!=""~"OF", P.OA_1!=""~"OA",P.OS_1!=""~"OS",P.XF_1!=""~"XF", P.XA_1!=""~"XA",P.XS_1!=""~"XS" )) %>% select(ResponseId, c(gender:nars_14), Condition)
+
+
+
+data_demo$age <- as.numeric(data_demo$age)
+
+nb_participants <- 290
+data_demo %>% group_by(gender) %>% summarise(
+    n = n(),proportion=n/nb_participants)
+data_demo %>% group_by(culture) %>% summarise(
+    n = n(),proportion=n/nb_participants)
+data_demo %>% group_by(home) %>% summarise(
+    n = n(),proportion=n/nb_participants)
+data_demo %>% group_by(alone) %>% summarise(
+    n = n(),proportion=n/nb_participants)
+data_demo %>% group_by(sharing) %>% summarise(
+    n = n(),proportion=n/nb_participants)
+data_demo %>% group_by(arrangnment) %>% summarise(
+    n = n(),proportion=n/nb_participants)
+
+data_demo <- data_demo %>% mutate(NARS_Interaction=(nars_4+nars_7+nars_8+nars_9+nars_10+nars_12)/6 , NARS_Social= (nars_1+nars_2+nars_11+nars_13+nars_14)/5, NARS_Emotion=(-nars_3-nars_5-nars_6)/3, NARS=(NARS_Interaction+NARS_Social+NARS_Emotion)/3, Place_Identity=(apas_1+apas_2+apas_3)/3, Place_Dependance=(apas_4+apas_5+apas_6)/3, Authority=status_1, Freedom_of_Access=status_2,Freedom_of_Action=status_3,Self_expression=status_4, Identity_oriented_marking=(marking_1+marking_6+marking_2+marking_3+marking_4+marking_5)/6)
+
+data_demo_long <- data_demo %>% pivot_longer(c(NARS_Interaction,NARS_Social,NARS_Emotion,NARS,Place_Identity,Place_Dependance,Authority,Freedom_of_Access,Freedom_of_Action,Self_expression,Identity_oriented_marking), names_to = "Metric", values_to = "Score") %>% group_by(Metric) %>%  summarise(M=round(mean(Score),1), SD=round(sd(Score),1), Md=round(median(Score),1), min=min(Score),max=max(Score) )
+  
+```
+
+SAM
+```{r}
+data_E_SAM_graph <- data_E_SAM %>% pivot_longer(cols = c(Valence, Arousal, Dominance), names_to = "SAM", values_to = "Rating") %>% mutate(Phase="Entry")
+data_O_SAM_graph <- data_O_SAM %>% pivot_longer(cols = c(Valence, Arousal, Dominance), names_to = "SAM", values_to = "Rating") %>% mutate(Phase="Occupancy")
+data_X_SAM_graph <- data_X_SAM %>% pivot_longer(cols = c(Valence, Arousal, Dominance), names_to = "SAM", values_to = "Rating") %>% mutate(Phase="Exit")
+data_SAM_graph <- rbind(data_E_SAM_graph, data_O_SAM_graph, data_X_SAM_graph)
+'pal_SAM <- c(
+  "EA"   = "#5e4c5f",   # plum
+  "OA"   = "#5e4c5f",   # plum
+  "XA"   = "#5e4c5f",   # plum
+  "EF" = "#99999999", # grey
+  "OF" = "#99999999", # grey
+  "XF" = "#99999999", # grey
+  "EB"   = "#ffbb6f",   # orange
+  "OB"   = "#ffbb6f",   # orange
+  "XB"   = "#ffbb6f",   # orange
+  "ES" = "#3BA7A0", # teal
+  "OS" = "#3BA7A0",# teal
+  "XS" = "#3BA7A0" # teal
+)
+'
+data_SAM_graph <- data_SAM_graph %>%
+    mutate(Vignette_grouped = case_when(
+        Vignette %in% c("EB","OB","XB") ~ "Baseline",
+        Vignette %in% c("EA","OA","XA") ~ "Action",
+        Vignette %in% c("EF","OF","XF") ~ "Freedom",
+        Vignette %in% c("ES","OS","XS") ~ "Status"
+    ),Vignette_grouped = factor(Vignette_grouped,
+                              levels = c("Baseline","Freedom","Action","Status")),
+    Phase = factor(Phase, levels = c("Entry","Occupancy","Exit")))
+
+pal_SAM <- c(
+    "Action"    = "#5e4c5f",   # plum
+    "Freedom"   = "#999999",   # grey
+    "Baseline"  = "#ffbb6f",   # orange
+    "Status"    = "#3BA7A0"    # teal
+)
+
+S<-data_SAM_graph %>% ggplot(aes(x=SAM, y=Rating, fill=Vignette_grouped))+ geom_hline(yintercept = 0, linewidth = 0.3, linetype = 2) +geom_boxplot(outlier.alpha = 0.00)+theme(legend.position = "bottom")+ scale_fill_manual(values = pal_SAM)+facet_col(~Phase)+ theme(
+    legend.title = element_blank(),   # legend title
+    legend.text  = element_text(size = 22),   # legend labels
+    axis.title   = element_text(size = 22),   # axis titles
+    axis.text    = element_text(size = 18),   # axis tick labels
+    strip.text   = element_text(size = 22)    # facet labels
+  )
+```
+
+```{r}
+data_E_beha_gg <-data_E_Behavior%>%select(Vignette:val_Response)  %>% mutate(Phase="Entry")
+data_O_beha_gg <-data_O_Behavior%>%select(Vignette:val_Response)  %>% mutate(Phase="Occupancy")
+data_X_beha_gg <-data_X_Behavior%>%select(Vignette:val_Response) %>% mutate(Phase="Exit")
+data_Be_graph <- rbind(data_E_beha_gg, data_O_beha_gg, data_X_beha_gg)
+
+data_Be_graph <- data_Be_graph %>%
+    mutate(Vignette_grouped = case_when(
+        Vignette %in% c("EB","OB","XB") ~ "Baseline",
+        Vignette %in% c("EA","OA","XA") ~ "Action",
+        Vignette %in% c("EF","OF","XF") ~ "Freedom",
+        Vignette %in% c("ES","OS","XS") ~ "Status"
+    ),Vignette_grouped = factor(Vignette_grouped,
+                              levels = c("Baseline","Freedom","Action","Status")),
+    Phase = factor(Phase, levels = c("Entry","Occupancy","Exit")))
+
+pal_be <- c(
+    "Action"    = "#5e4c5f",   # plum
+    "Freedom"   = "#999999",   # grey
+    "Baseline"  = "#ffbb6f",   # orange
+    "Status"    = "#3BA7A0"    # teal
+)
+
+B<- data_Be_graph %>% ggplot(aes(x=Dimension, y=val_Response, fill=Vignette_grouped))+ geom_hline(yintercept = 0, linewidth = 0.3, linetype = 2) +geom_boxplot(outlier.alpha = 0.00)+theme(legend.position = "bottom")+   coord_cartesian(ylim = c(-3, 3)) +   # fixes y-axis range without dropping data
+  scale_y_continuous(position="right",
+    breaks = c(-3, 0, 3),
+    labels = c("Very Unlikely (-3)", "Neutral (0)", "Very Likely (3)")
+  ) +  scale_fill_manual(values = pal_be)+facet_col(~Phase)+ theme(
+    legend.title = element_blank(),   # legend title
+    legend.text  = element_text(size = 22),   # legend labels
+    axis.title   = element_text(size = 22),   # axis titles
+    axis.text    = element_text(size = 18),   # axis tick labels
+    strip.text   = element_text(size = 22)    # facet labels
+  ) + ylab("Behavior Likeliness Rating") + xlab("Defense Type") 
+
+ggarrange(S,B,ncol=2, common.legend = TRUE, legend = "bottom")
+
+```
+
+
+```{r}
+pal_SAM <- c(
+  "Arousal"="#5e4c5f","Dominance"="#99999999","Valence"="#ffbb6f")
+data_E_SAM_graph %>% ggplot(aes(x=Vignette, y=Rating, fill=SAM))+geom_boxplot(outlier.alpha = 0.00)+theme(legend.position = "bottom")+coord_flip()+ scale_fill_manual(values = pal_SAM) +facet_row()
+
+
+data_E_SAM_gg <-data_E_SAM
+data_E_SAM_gg$Vignette <- as.factor(data_E_SAM_gg$Vignette) 
+data_E_SAM_gg <- data_E_SAM_gg %>% mutate(Friction.Point=case_when(Vignette=="EB"~"Baseline", Vignette=="EF"~"Freedom of Access", Vignette=="EA" ~ "Entry Action (Entry Point)", Vignette=="ES"~"Status Alteration (Authority)"))
+
+data_E_SAM_gg <- data_E_SAM_gg %>% filter(Friction.Point=="Baseline" | Friction.Point=="Freedom of Access")
+
+a<-ggbetweenstats(data_E_SAM_gg,Friction.Point,Dominance, bf.message=F,results.subtitle=F,pairwise.display = "none")+ylab("Dominance") +xlab("") +theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank())
+b<-ggbetweenstats(data_E_SAM_gg,Friction.Point,Arousal, bf.message=F,results.subtitle=F,pairwise.display = "none")+ylab("Arousal") +xlab("")+theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank()) 
+c<-ggbetweenstats(data_E_SAM_gg,Friction.Point,Valence, bf.message=F,results.subtitle=F,pairwise.display = "none") +xlab("")+theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),axis.ticks.x=element_blank()) + ylab("Valence")
+
+data_E_beha_gg <-data_E_Behavior%>%select(Vignette:val_Response)
+data_E_beha_gg <- data_E_beha_gg %>% mutate(Friction.Point=case_when(Vignette=="EB"~"Baseline", Vignette=="EF"~"Freedom of Access", Vignette=="EA" ~ "Entry Action (Entry Point)", Vignette=="ES"~"Status Alteration (Authority)"))
+ggbetweenstats(data_E_beha_gg,Friction.Point,Valence, bf.message=F,results.subtitle=F,pairwise.display = "none") +xlab("")+theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),axis.ticks.x=element_blank()) + ylab("Valence")
+
+ggarrange(c,b,a, ncol = 3, common.legend = TRUE, legend="top") 
+
+grouped_ggwithinstats(Q_data_pivot_order, Condition,Score, grouping.var = Question, p.adjust.method = "bonferroni", bf.message=F, plotgrid.args    = list(nrow = 1))
+
+data_E_gg <- data_art %>% select(Vignette:is_congruent)
+data_E_gg$ΔE<-abs(data_E_gg$ΔE)
+
+d<-grouped_ggbetweenstats(data_E_gg ,Dimension,ΔE,grouping.var = Vignette, bf.message=F,results.subtitle=F,pairwise.display = "none", plotgrid.args    = list(nrow = 1)) +xlab("") +theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank())
+e<-grouped_ggbetweenstats(data_E_gg ,Dimension,D_val,grouping.var = Vignette, bf.message=F,results.subtitle=F,pairwise.display = "none", plotgrid.args = list(nrow = 1)) +xlab("")+theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank())
+x<-ggarrange(d,e, nrow = 1, common.legend = TRUE, legend="bottom")
+
+
+
+ggarrange(a,b,c,x, nrow = 2, common.legend = TRUE, legend="top") 
+
+```
+
+```{r}
+d <- data_E_beha_gg %>% filter(Vignette=="EB" | Vignette=="EF") %>% filter(B_Statement!="I would talk to someone else to express that the robot misbehaved.") %>% 
+  mutate(Response = as.factor(Response),
+    Response = case_when(Response=="Neither likely nor unlikely"~"Neutral", TRUE ~ Response),  # short label (optional)
+    Response = factor(
+      Response,
+      levels = c("Very Unlikely","Unlikely","Somewhat unlikely",
+                 "Neutral",
+                 "Somewhat likely","Likely","Very Likely"),
+      ordered = TRUE
+    )
+  )
+
+dfc <- d %>%
+  count(B_Statement, Response, Vignette, drop = FALSE) %>%   # .drop=FALSE keeps empty cells
+  group_by(B_Statement, Vignette) %>%
+  mutate(
+    pct = n / sum(n)                 # percentage in each response within a statement
+  ) %>%
+  ungroup()
+
+pal <- c(
+  "Very Likely"="#1f77b4","Likely"="#3b8ec0","Somewhat likely"="#74add1",
+  "Neutral"="#bdbdbd",
+  "Somewhat unlikely"="#fdd0a2","Unlikely"="#fdae6b","Very Unlikely"="#e6550d"
+)
+
+ggplot(dfc, aes(x = Vignette, y = pct, fill = Response)) +
+  geom_col(width = 0.2, color = "white", linewidth = 0.05) +     # stacked columns
+  coord_flip() +                                                  # statements on the left
+  geom_hline(yintercept = 0.5, linewidth = 0.3, linetype = 3) +   # center reference
+  scale_y_continuous(labels = percent_format(accuracy = 1),
+                     limits = c(0, 1), expand = c(0, 0)) +
+  scale_fill_manual(values = pal, breaks = levels(d$Response), name = NULL) +
+  labs(x = NULL, y = NULL) +
+  theme_minimal(base_size = 11) +
+  theme(
+    legend.position = "top",
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank()
+  )+ facet_wrap(~ B_Statement)+
+  guides(fill = guide_legend(nrow = 1, byrow = TRUE)) +
+  theme(
+    legend.position = "top",
+    legend.box = "horizontal",
+    legend.text = element_text(size = 9),
+    legend.key.width  = unit(10, "pt"),
+    legend.key.height = unit(10, "pt"),
+    legend.spacing.x  = unit(4, "pt"),
+    legend.margin     = margin(0, 0, 0, 0),
+    legend.box.margin = margin(0, 0, 0, 0),
+  )
+
+grouped_ggbetweenstats(data_E_gg ,Dimension,ΔE,grouping.var = Vignette, bf.message=F,results.subtitle=F,pairwise.display = "none", plotgrid.args    = list(nrow = 1)) +xlab("") +theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank())
+
+data_E_gg %>% filter(Vignette=="EB" | Vignette=="EF") %>% ggplot(aes(x=Dimension, y=ΔE, fill=Vignette))+geom_boxplot(outlier.alpha = 0.05, alpha=0.5)
+```
+
+```{r}
+data_O_gg <- data_art_O %>% select(Vignette:is_congruent)
+data_X_gg <- data_art_X %>% select(Vignette:is_congruent)
+
+data_O_gg_D <- data_O_gg %>% 
+  count(Dimension, D, Vignette, drop = FALSE) %>%   # .drop=FALSE keeps empty cells
+  group_by(Dimension, Vignette) %>%
+  mutate(
+    pct = n / sum(n)                 # percentage in each response within a statement
+  ) %>%
+  ungroup()
+
+data_X_gg_D <- data_X_gg %>% 
+  count(Dimension, D, Vignette, drop = FALSE) %>%   # .drop=FALSE keeps empty cells
+  group_by(Dimension, Vignette) %>%
+  mutate(
+    pct = n / sum(n)                 # percentage in each response within a statement
+  ) %>%
+  ungroup()
+
+
+data_E_gg_D_wide <- data_E_gg_D %>% mutate(pct100=pct*100) %>% pivot_wider(id_cols =c(Dimension,Vignette), names_from = D, values_from = pct100, values_fill = 0) %>% data.frame() %>% mutate(Item=Dimension) %>% select(-Dimension)
+data_O_gg_D_wide <- data_O_gg_D %>% mutate(pct100=pct*100) %>% pivot_wider(id_cols =c(Dimension,Vignette), names_from = D, values_from = pct100, values_fill = 0) %>% data.frame() %>% mutate(Item=Dimension) %>% select(-Dimension)
+data_X_gg_D_wide <- data_X_gg_D %>% mutate(pct100=pct*100) %>% pivot_wider(id_cols =c(Dimension,Vignette), names_from = D, values_from = pct100, values_fill = 0) %>% data.frame() %>% mutate(Item=Dimension) %>% select(-Dimension)
+
+dfO<- data_O_gg_D_wide  %>% mutate(Item=as.factor(Item)) %>% filter(Vignette=="OB") %>% select(Item, c(As.I.expected:Slightly.worse))
+dfO<-dfO %>% rename("Much worse than expected" = Much.worse.than.expected, "As I expected" = As.I.expected, "Slightly better"=Slightly.better, "Slightly worse"=Slightly.worse, "Moderately worse"=Moderately.worse, "Moderately better"=Moderately.better, "Much better than expected" = Much.better.than.expected)
+dfO_ordered <- data.frame(Item=dfO$Item, "Much worse than expected"=dfO$`Much worse than expected`, "Moderately worse"=dfO$`Moderately worse`, "Slightly worse"=dfO$`Slightly worse`, "As I expected"=dfO$`As I expected`, "Slightly better"=dfO$`Slightly better`, "Moderately better"=dfO$`Moderately better`, "Much better than expected"=dfO$`Much better than expected`)
+ob<-plot(likert(summary = dfO_ordered))+ggtitle("EB")+
+    labs(x = NULL, title = "EB") +
+    theme_minimal(base_size = 14) +
+    theme(
+        legend.position = "none",
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank(),
+        # title styling
+        plot.title = element_text(hjust = 0.5, size = 16)
+    ) + ylab("")
+
+
+pal <- c(
+  "Much better than expected"="#1f77b4","Moderately better"="#3b8ec0","Slightly better"="#74add1",
+  "As I expected"="#bdbdbd",
+  "Slightly worse"="#fdd0a2","Moderately worse"="#fdae6b","Much worse than expected"="#e6550d"
+)
+
+df<- data_E_gg_D_wide  %>% mutate(Item=as.factor(Item)) %>% filter(Vignette=="EB") %>% select(Item, c(As.I.expected:Slightly.worse))
+df<-df %>% rename("Much worse than expected" = Much.worse.than.expected, "As I expected" = As.I.expected, "Slightly better"=Slightly.better, "Slightly worse"=Slightly.worse, "Moderately worse"=Moderately.worse, "Moderately better"=Moderately.better, "Much better than expected" = Much.better.than.expected)
+df_ordered <- data.frame(Item=df$Item, "Much worse than expected"=df$`Much worse than expected`, "Moderately worse"=df$`Moderately worse`, "Slightly worse"=df$`Slightly worse`, "As I expected"=df$`As I expected`, "Slightly better"=df$`Slightly better`, "Moderately better"=df$`Moderately better`, "Much better than expected"=df$`Much better than expected`)
+eb<-plot(likert(items=df_ordered[,1], summary = df_ordered))+ggtitle("EB")+
+    labs(x = NULL, title = "EB") +
+    theme_minimal(base_size = 14) +
+    theme(
+        legend.position = "none",
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank(),
+        # title styling
+        plot.title = element_text(hjust = 0.5, size = 16)
+    ) + ylab("")
+
+df<- data_E_gg_D_wide  %>% mutate(Item=as.factor(Item)) %>% filter(Vignette=="EF") %>% select(Item, c(As.I.expected:Slightly.worse))
+df<-df %>% rename("Much worse than expected" = Much.worse.than.expected, "As I expected" = As.I.expected, "Slightly better"=Slightly.better, "Slightly worse"=Slightly.worse, "Moderately worse"=Moderately.worse, "Moderately better"=Moderately.better, "Much better than expected" = Much.better.than.expected)
+df_ordered <- data.frame(Item=df$Item, "Much worse than expected"=df$`Much worse than expected`, "Moderately worse"=df$`Moderately worse`, "Slightly worse"=df$`Slightly worse`, "As I expected"=df$`As I expected`, "Slightly better"=df$`Slightly better`, "Moderately better"=df$`Moderately better`, "Much better than expected"=df$`Much better than expected`)
+ef<-plot(likert(items=df_ordered[,1], summary = df_ordered))+
+    labs(x = NULL, title = "EF") +
+    theme_minimal(base_size = 14) +
+    theme(
+      legend.position = "none",
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank(),
+        # title styling
+        plot.title = element_text(hjust = 0.5, size = 16,
+                                  margin = margin(b = 6))
+    ) + ylab("")
+
+df<- data_E_gg_D_wide  %>% mutate(Item=as.factor(Item)) %>% filter(Vignette=="EA") %>% select(Item, c(As.I.expected:Slightly.worse))
+df<-df %>% rename("Much worse than expected" = Much.worse.than.expected, "As I expected" = As.I.expected, "Slightly better"=Slightly.better, "Slightly worse"=Slightly.worse, "Moderately worse"=Moderately.worse, "Moderately better"=Moderately.better, "Much better than expected" = Much.better.than.expected)
+df_ordered <- data.frame(Item=df$Item, "Much worse than expected"=df$`Much worse than expected`, "Moderately worse"=df$`Moderately worse`, "Slightly worse"=df$`Slightly worse`, "As I expected"=df$`As I expected`, "Slightly better"=df$`Slightly better`, "Moderately better"=df$`Moderately better`, "Much better than expected"=df$`Much better than expected`)
+ea<-plot(likert(items=df_ordered[,1], summary = df_ordered))+ggtitle("EA")+
+    labs(x = NULL, title = "EA") +
+    theme_minimal(base_size = 14) +
+    theme(
+      legend.position = "none",
+        axis.text.x  = element_blank(),
+        axis.ticks.x = element_blank(),
+        # title styling
+        plot.title = element_text(hjust = 0.5, size = 16,
+                                  margin = margin(b = 6))
+    ) + ylab("")
+
+df<- data_E_gg_D_wide  %>% mutate(Item=as.factor(Item)) %>% filter(Vignette=="ES") %>% select(Item, c(As.I.expected:Slightly.worse))
+df<-df %>% rename("Much worse than expected" = Much.worse.than.expected, "As I expected" = As.I.expected, "Slightly better"=Slightly.better, "Slightly worse"=Slightly.worse, "Moderately worse"=Moderately.worse, "Moderately better"=Moderately.better, "Much better than expected" = Much.better.than.expected)
+df_ordered <- data.frame(Item=df$Item, "Much worse than expected"=df$`Much worse than expected`, "Moderately worse"=df$`Moderately worse`, "Slightly worse"=df$`Slightly worse`, "As I expected"=df$`As I expected`, "Slightly better"=df$`Slightly better`, "Moderately better"=df$`Moderately better`, "Much better than expected"=df$`Much better than expected`)
+es<-plot(likert(items=df_ordered[,1], summary = df_ordered))+ggtitle("ES")+
+    labs(x = NULL, title = "ES") +
+    theme_minimal(base_size = 14) +  theme_minimal(base_size = 14) +
+    theme(
+      legend.position = "none",
+        # title styling
+        plot.title = element_text(hjust = 0.5, size = 16,
+                                  margin = margin(b = 6))
+    ) 
+
+ggarrange(eb,ef,ea,es,ncol = 1, common.legend = TRUE, legend = "bottom")
+```
+
+```{r}
+items24 <- pisaitems[,substr(names(pisaitems), 1,5) == 'ST24Q']
+head(items24); ncol(items24)
+
+names(items24) <- c(
+			ST24Q01="I read only if I have to.",
+			ST24Q02="Reading is one of my favorite hobbies.",
+			ST24Q03="I like talking about books with other people.",
+			ST24Q04="I find it hard to finish books.",
+			ST24Q05="I feel happy if I receive a book as a present.",
+			ST24Q06="For me, reading is a waste of time.",
+			ST24Q07="I enjoy going to a bookstore or a library.",
+			ST24Q08="I read only to get information that I need.",
+			ST24Q09="I cannot sit still and read for more than a few minutes.",
+			ST24Q10="I like to express my opinions about books I have read.",
+			ST24Q11="I like to exchange books with my friends.")
+str(items24)
+
+l24 <- likert(items24)
+
+# Plots
+plot(l24)
+plot(l24, ordered=FALSE, group.order=names(items24)) #Specify the exact order of the y-axis
+plot(l24, centered=FALSE, wrap=30)
+plot(l24, center=1.5, wrap=30)
+plot(l24, center=2, wrap=30)
+plot(l24, center=2, include.center=FALSE, wrap=30)
+plot(l24, center=2, include.center=FALSE, wrap=20)
+plot(l24, plot.percents=TRUE, plot.percent.low=FALSE, plot.percent.high=FALSE)
+plot(l24, center=2, plot.percents=TRUE, plot.percent.low=FALSE, plot.percent.high=FALSE)
+
+plot(l24, colors=c('orange','darkorange','darkblue','blue'))
+
+#Include histogram with response counts
+plot(l24, include.histogram=TRUE)
+
+# Heat map
+plot(l24, type='heat', wrap=30, text.size=4, digits = 1)
+plot(l24, type='heat', wrap=30, text.size=4, digits = 3)
+
+# Reverse the levels
+items24.reverse <- reverse.levels(items24)
+l24.reverse <- likert(items24.reverse)
+print(l24.reverse)
+plot(l24.reverse)
+
+
+##### Group by Country
+l24g <- likert(items24, grouping=pisaitems$CNT)
+print(l24g)
+summary(l24g)
+summary(l24g, center=1.5)
+summary(l24g, center=2)
+```
+´
+```{r}
+data_likert_E <- data_art %>% filter(Dimension!="Entry Enacment") %>% select(ResponseId, D, Dimension, Vignette) %>% data.frame()
+
+data_likert_E <- data_likert_E %>% pivot_wider(names_from = Dimension, values_from = D) %>% data.frame()
+
+colnames(data_likert_E) <- c("ResponseId", "Vignette", "Freedom of Access", "Entry Point", "Status Alteration (Authority)")
+
+data_likert_E$"Freedom of Access" <- as.factor(data_likert_E$"Freedom of Access") 
+data_likert_E$"Freedom of Access" <- factor(data_likert_E$"Freedom of Access", levels = c("Much better than expected","Moderately better","Slightly better",
+  "As I expected","Slightly worse","Moderately worse","Much worse than expected"))
+
+data_likert_E$"Entry Point" <- as.factor(data_likert_E$"Entry Point")
+data_likert_E$"Entry Point" <- factor(data_likert_E$"Entry Point", levels = c("Much better than expected","Moderately better","Slightly better",
+  "As I expected","Slightly worse","Moderately worse","Much worse than expected"))
+
+
+data_likert_E$"Status Alteration (Authority)" <- as.factor(data_likert_E$"Status Alteration (Authority)")
+data_likert_E$"Status Alteration (Authority)" <- factor(data_likert_E$"Status Alteration (Authority)", levels = c("Much better than expected","Moderately better","Slightly better",
+  "As I expected","Slightly worse","Moderately worse","Much worse than expected"))
+
+l24g <- likert(data_likert_E[,3:5], grouping=data_likert_E$Vignette)
+
+a<- plot(l24g, group.order=c("EB", "EF","EA","ES"), colors=c(
+  "Much better than expected"="#1f77b4","Moderately better"="#3b8ec0","Slightly better"="#74add1",
+  "As I expected"="#bdbdbd",
+  "Slightly worse"="#fdd0a2","Moderately worse"="#fdae6b","Much worse than expected"="#e6550d"
+)) +theme(text=element_text(size=22))
+```
+
+```{r}
+data_likert_O <- data_art_O %>% filter(Dimension!="Intrisic Action (Cooking)") %>% select(ResponseId, D, Dimension, Vignette) %>% data.frame()
+
+data_likert_O <- data_likert_O %>% pivot_wider(names_from = Dimension, values_from = D) %>% data.frame()
+
+colnames(data_likert_O) <- c("ResponseId", "Vignette", "Freedom of Action", "Intrinsic Action", "Status Alteration (F. of Action)")
+
+data_likert_O$"Freedom of Action" <- as.factor(data_likert_O$"Freedom of Action") 
+data_likert_O$"Freedom of Action" <- factor(data_likert_O$"Freedom of Action", levels = c("Much better than expected","Moderately better","Slightly better",
+  "As I expected","Slightly worse","Moderately worse","Much worse than expected"))
+
+data_likert_O$"Intrinsic Action" <- as.factor(data_likert_O$"Intrinsic Action")
+data_likert_O$"Intrinsic Action" <- factor(data_likert_O$"Intrinsic Action", levels = c("Much better than expected","Moderately better","Slightly better",
+  "As I expected","Slightly worse","Moderately worse","Much worse than expected"))
+
+data_likert_O$"Status Alteration (F. of Action)" <- as.factor(data_likert_O$"Status Alteration (F. of Action)")
+data_likert_O$"Status Alteration (F. of Action)" <- factor(data_likert_O$"Status Alteration (F. of Action)", levels = c("Much better than expected","Moderately better","Slightly better",
+  "As I expected","Slightly worse","Moderately worse","Much worse than expected"))
+
+l24g <- likert(data_likert_O[,3:5], grouping=data_likert_O$Vignette)
+
+b<-plot(l24g, group.order=c("OB", "OF","OA","OS"), colors=c(
+  "Much better than expected"="#1f77b4","Moderately better"="#3b8ec0","Slightly better"="#74add1",
+  "As I expected"="#bdbdbd",
+  "Slightly worse"="#fdd0a2","Moderately worse"="#fdae6b","Much worse than expected"="#e6550d"
+)) +theme(text=element_text(size=22))
+```
+
+
+```{r}
+data_likert_E <- data_art_X %>% filter(Dimension!="Exit Enacment") %>% select(ResponseId, D, Dimension, Vignette) %>% data.frame()
+
+data_likert_E <- data_likert_E %>% pivot_wider(names_from = Dimension, values_from = D) %>% data.frame()
+
+colnames(data_likert_E) <- c("ResponseId", "Vignette", "Freedom of Exit", "Exit Point", "Status Alteration (Authority)")
+
+data_likert_E$"Freedom of Exit" <- as.factor(data_likert_E$"Freedom of Exit") 
+data_likert_E$"Freedom of Exit" <- factor(data_likert_E$"Freedom of Exit", levels = c("Much better than expected","Moderately better","Slightly better",
+  "As I expected","Slightly worse","Moderately worse","Much worse than expected"))
+
+data_likert_E$"Exit Point" <- as.factor(data_likert_E$"Exit Point")
+data_likert_E$"Exit Point" <- factor(data_likert_E$"Exit Point", levels = c("Much better than expected","Moderately better","Slightly better",
+  "As I expected","Slightly worse","Moderately worse","Much worse than expected"))
+
+data_likert_E$"Status Alteration (Authority)" <- as.factor(data_likert_E$"Status Alteration (Authority)")
+data_likert_E$"Status Alteration (Authority)" <- factor(data_likert_E$"Status Alteration (Authority)", levels = c("Much better than expected","Moderately better","Slightly better",
+  "As I expected","Slightly worse","Moderately worse","Much worse than expected"))
+
+l24g <- likert(data_likert_E[,3:5], grouping=data_likert_E$Vignette)
+
+c<-plot(l24g, group.order=c("XB", "XF","XA","XS"), colors=c(
+  "Much better than expected"="#1f77b4","Moderately better"="#3b8ec0","Slightly better"="#74add1",
+  "As I expected"="#bdbdbd",
+  "Slightly worse"="#fdd0a2","Moderately worse"="#fdae6b","Much worse than expected"="#e6550d"
+)) +theme(text=element_text(size=22))
+```
+
+
+```{r}
+#Congruence
+data_E_gg_C <- data_E_gg %>% 
+  count(Dimension, Congruence, Vignette, drop = FALSE) %>%   # .drop=FALSE keeps empty cells
+  group_by(Dimension, Vignette) %>%
+  mutate(
+    pct = n / sum(n)                 # percentage in each response within a statement
+  ) %>%
+  ungroup()
+
+data_E_gg_C <-  data_E_gg_C %>% mutate(Friction.Point=case_when(Vignette=="EB"~"Baseline (EB)", Vignette=="ES"~"Status Alteration (ES)", Vignette=="EA"~"Entry Action (EA)",Vignette=="EF"~"Freedom of Access (EF)" )) 
+
+data_E_gg_C$Congruence <-factor(data_E_gg_C$Congruence, 
+                    levels = c("Congruent","Incongruent"),
+                    labels = c("Congruent","Incongruent"))
+
+palC <- c(
+  "Congruent"="#bdbdbd","Incongruent"="#e6550d"
+)
+
+C<-ggplot(data_E_gg_C, aes(x = Dimension, y = pct, fill = Congruence, alpha=Congruence)) +
+  coord_flip()+
+    geom_col(width = 1, color = "white", linewidth = 3) +     # stacked columns
+    # statements on the left
+  scale_alpha_manual(
+        values = setNames(c(.50, .90), levels(data_E_gg_C$Congruence)),
+        guide = "none"   # don’t show a second legend for alpha 
+    )+
+    geom_hline(yintercept = 0.5, linewidth = 0.3, linetype = 3) +
+    scale_fill_manual(values = palC, breaks = levels(data_E_gg_C$Congruence), name = NULL)+# center reference
+  scale_y_continuous(labels = percent_format(accuracy = 1),
+                       limits = c(0, 1), expand = c(0, 0)) +
+    labs(x = NULL, y = "Congruence Proportion") +
+    theme_minimal(base_size = 11) +
+    theme(
+        legend.position = "none",
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor = element_blank()
+    )+facet_col(~ Friction.Point)
+
+#Disconfirmation
+data_E_gg_D <- data_E_gg %>% 
+  count(Dimension, D, Vignette, drop = FALSE) %>%   # .drop=FALSE keeps empty cells
+  group_by(Dimension, Vignette) %>%
+  mutate(
+    pct = n / sum(n)                 # percentage in each response within a statement
+  ) %>%
+  ungroup()
+
+pal <- c(
+  "Much better than expected"="#1f77b4","Moderately better"="#3b8ec0","Slightly better"="#74add1",
+  "As I expected"="#bdbdbd",
+  "Slightly worse"="#fdd0a2","Moderately worse"="#fdae6b","Much worse than expected"="#e6550d"
+)
+
+data_E_gg_D <-  data_E_gg_D %>% mutate(Friction.Point=case_when(Vignette=="EB"~"Baseline (EB)", Vignette=="ES"~"Status Alteration (ES)", Vignette=="EA"~"Entry Action (EA)",Vignette=="EF"~"Freedom of Access (EF)" )) 
+
+data_E_gg_D$D <-factor(data_E_gg_D$D, 
+                    levels = c("Much worse than expected","Moderately worse","Slightly worse",
+                 "As I expected",
+                 "Slightly better","Moderately better","Much better than expected"),
+                    labels = c("Much worse than expected","Moderately worse","Slightly worse",
+                 "As I expected",
+                 "Slightly better","Moderately better","Much better than expected"))
+
+D<- ggplot(data_E_gg_D, aes(x = Dimension, y = pct, fill = D, alpha = D)) +
+  coord_flip()+
+    scale_alpha_manual(
+        values = setNames(c(.90, .80, .70, .5, .50, .50, .50), levels(data_E_gg_D$D)),
+        guide = "none"   # don’t show a second legend for alpha
+    )+
+    geom_col(width = 1, color = "white", linewidth = 3) +     # stacked columns
+    # statements on the left
+    geom_hline(yintercept = 0.5, linewidth = 0.3, linetype = 3) +
+    scale_fill_manual(values = pal, breaks = levels(data_E_gg_D$D), name = NULL)+# center reference
+    scale_y_continuous(labels = percent_format(accuracy = 1),
+                       limits = c(0, 1), expand = c(0, 0)) +
+    labs(x = NULL , y = "Disconfirmation") +
+    theme_minimal(base_size = 11) +
+    theme(
+        legend.position = "none",
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor = element_blank()
+    )+ facet_wrap(~ Friction.Point)
+ggarrange(D,C, nrow = 2)
+
+D_div<-data_E_gg_D
+D_div$pct<-D_div$pct*100
+```
+
+
+```{r}
+D_noleg <- D + theme(legend.position = "top")
+C_noleg <- C + theme(legend.position = "top")
+
+# 2) Extract legends (force similar formatting so they look consistent)
+leg_D <- get_legend(
+  D + guides(fill = guide_legend(ncol = 1, byrow = TRUE)) +
+    theme(
+      legend.title = element_blank(),
+      legend.text  = element_text(size = 15, hjust = 0),
+      legend.key.height = unit(3.5, "mm"),
+      legend.key.width  = unit(6, "mm"),
+      legend.box.margin = margin(2, 2, 2, 2)
+    )
+)
+
+leg_C <- get_legend(
+  C + guides(fill = guide_legend(ncol = 1, byrow = TRUE)) +
+    theme(
+      legend.title = element_blank(),
+      legend.text  = element_text(size = 15, hjust = 0),
+      legend.key.height = unit(3.5, "mm"),
+      legend.key.width  = unit(6, "mm"),
+      legend.box.margin = margin(2, 2, 2, 2)
+    )
+)
+
+# 3) Stack plots (left) and legends (right), give legend column a fixed share
+left_col  <- plot_grid(D_noleg, C_noleg, ncol = 1, align = "v", rel_heights = c(1, 1))
+right_col <- plot_grid(leg_D,   leg_C,   ncol = 1, align = "v", rel_heights = c(1, 1))
+
+final <- plot_grid(left_col, right_col, ncol = 2, rel_widths = c(1, 0.2))
+final
+
+```
+
+
+```{r}
+#SAM
+#------
+#ENTRY
+#------
+data_E_SAM<- data %>% select(ResponseId,T.EB_Page.Submit,time.EF_Page.Submit,T.EA_Page.Submit,T.ES_Page.Submit, c(P.EB_1:A.EB),c(P.EF_1:A.EF),c(P.EA_1:A.EA),c(P.ES_1:A.ES),expectations_1,expectations_2,expectations_3,expectations_4,expectations_5,expectations_6 )
+
+data_E_SAM <- data_E_SAM %>%
+    pivot_longer(
+        cols = c(P.EB_1,P.EB_2,P.EB_3,P.EB_4,P.EF_1,P.EF_2,P.EF_3,P.EF_4,P.EA_1,P.EA_2,P.EA_3,P.EA_4,P.ES_1,P.ES_2,P.ES_3,P.ES_4),
+        names_to = c("Vignette", "Item"),
+        names_pattern = "P\\.(..)_([0-9])",
+        values_to = "Response"
+    ) %>% filter(!(Response=="")) %>%
+    mutate(Valence=case_when(Valence.EB_1=="On"~1, Valence.EB_2=="On"~2, Valence.EB_3=="On"~3, Valence.EB_4=="On"~4,Valence.EB_5=="On"~5,Valence.EB_6=="On"~6,Valence.EB_7=="On"~7,Valence.EB_8=="On"~8,Valence.EB_9=="On"~9, Valence.EF_1=="On"~1, Valence.EF_2=="On"~2, Valence.EF_3=="On"~3, Valence.EF_4=="On"~4,Valence.EF_5=="On"~5,Valence.EF_6=="On"~6,Valence.EF_7=="On"~7,Valence.EF_8=="On"~8,Valence.EF_9=="On"~9,Valence.EA_1=="On"~1, Valence.EA_2=="On"~2, Valence.EA_3=="On"~3, Valence.EA_4=="On"~4,Valence.EA_5=="On"~5,Valence.EA_6=="On"~6,Valence.EA_7=="On"~7,Valence.EA_8=="On"~8,Valence.EA_9=="On"~9,Valence.ES_1=="On"~1, Valence.ES_2=="On"~2, Valence.ES_3=="On"~3, Valence.ES_4=="On"~4,Valence.ES_5=="On"~5,Valence.ES_6=="On"~6,Valence.ES_7=="On"~7,Valence.ES_8=="On"~8,Valence.ES_9=="On"~9), Arousal=case_when(Arousal.EB_1=="On"~1, Arousal.EB_2=="On"~2, Arousal.EB_3=="On"~3, Arousal.EB_4=="On"~4,Arousal.EB_5=="On"~5,Arousal.EB_6=="On"~6,Arousal.EB_7=="On"~7,Arousal.EB_8=="On"~8,Arousal.EB_9=="On"~9, Arousal.EF_1=="On"~1, Arousal.EF_2=="On"~2, Arousal.EF_3=="On"~3, Arousal.EF_4=="On"~4,Arousal.EF_5=="On"~5,Arousal.EF_6=="On"~6,Arousal.EF_7=="On"~7,Arousal.EF_8=="On"~8,Arousal.EF_9=="On"~9,Arousal.EA_1=="On"~1, Arousal.EA_2=="On"~2, Arousal.EA_3=="On"~3, Arousal.EA_4=="On"~4,Arousal.EA_5=="On"~5,Arousal.EA_6=="On"~6,Arousal.EA_7=="On"~7,Arousal.EA_8=="On"~8,Arousal.EA_9=="On"~9,Arousal.ES_1=="On"~1, Arousal.ES_2=="On"~2, Arousal.ES_3=="On"~3, Arousal.ES_4=="On"~4,Arousal.ES_5=="On"~5,Arousal.ES_6=="On"~6,Arousal.ES_7=="On"~7,Arousal.ES_8=="On"~8,Arousal.ES_9=="On"~9), Dominance=case_when(Dominance.EB_1=="On"~1, Dominance.EB_2=="On"~2, Dominance.EB_3=="On"~3, Dominance.EB_4=="On"~4,Dominance.EB_5=="On"~5,Dominance.EB_6=="On"~6,Dominance.EB_7=="On"~7,Dominance.EB_8=="On"~8,Dominance.EB_9=="On"~9, Dominance.EF_1=="On"~1, Dominance.EF_2=="On"~2, Dominance.EF_3=="On"~3, Dominance.EF_4=="On"~4,Dominance.EF_5=="On"~5,Dominance.EF_6=="On"~6,Dominance.EF_7=="On"~7,Dominance.EF_8=="On"~8,Dominance.EF_9=="On"~9,Dominance.EA_1=="On"~1, Dominance.EA_2=="On"~2, Dominance.EA_3=="On"~3, Dominance.EA_4=="On"~4,Dominance.EA_5=="On"~5,Dominance.EA_6=="On"~6,Dominance.EA_7=="On"~7,Dominance.EA_8=="On"~8,Dominance.EA_9=="On"~9,Dominance.ES_1=="On"~1, Dominance.ES_2=="On"~2, Dominance.ES_3=="On"~3, Dominance.ES_4=="On"~4,Dominance.ES_5=="On"~5,Dominance.ES_6=="On"~6,Dominance.ES_7=="On"~7,Dominance.ES_8=="On"~8,Dominance.ES_9=="On"~9)) %>% select(ResponseId,Valence,Arousal,Dominance,Vignette) %>% unique()
+
+data_E_SAM$Vignette <- as.factor(data_E_SAM$Vignette)
+
+data_E_SAM$Valence <- data_E_SAM$Valence-5
+data_E_SAM$Arousal <- data_E_SAM$Arousal-5
+data_E_SAM$Dominance <- data_E_SAM$Dominance-5
+
+#---Decriptive
+data_E_SAM_descriptive <- data_E_SAM %>% group_by(Vignette) %>% summarise(M_Val=round(mean(Valence),1),Mdn_Val=round(median(Valence),1), SD_Val=round(sd(Valence),1),M_Aro=round(mean(Arousal),1),Mdn_Aro=round(median(Arousal),1), SD_Aro=round(sd(Arousal),1),M_Dom=round(mean(Dominance),1),Mdn_Dom=round(median(Dominance),1), SD_Dom=round(sd(Dominance),1))
+data_E_SAM_descriptive <- data.frame(data_E_SAM_descriptive)
+lvl_vig <- c("EB","EF","EA","ES")
+data_E_SAM_descriptive <- data_E_SAM_descriptive %>%
+    mutate(
+        Vignette  = fct_relevel(Vignette,  lvl_vig)
+    ) %>%
+    arrange(Vignette)
+data_E_SAM_descriptive
+
+#----Valence
+ggbetweenstats(data_E_SAM,Vignette,Valence,p.adjust.method = "holm", bf.message=F)
+
+m1V <- art(Valence ~ Vignette , data=filter(data_E_SAM))
+av<-anova(m1V)
+av$eta.sq.part = with(av, `Sum Sq`/(`Sum Sq` + `Sum Sq.res`))
+av
+art.con(m1V, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+#----Arousal
+ggbetweenstats(data_E_SAM,Vignette,Arousal,p.adjust.method = "holm", bf.message=F)
+m1A <- art(Arousal ~ Vignette , data=filter(data_E_SAM))
+av<-anova(m1A)
+av$eta.sq.part = with(av, `Sum Sq`/(`Sum Sq` + `Sum Sq.res`))
+av
+art.con(m1A, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+#----Dominance
+ggbetweenstats(data_E_SAM,Vignette,Dominance,p.adjust.method = "holm", bf.message=F)
+m1D <- art(Dominance ~ Vignette , data=filter(data_E_SAM))
+av<-anova(m1D)
+av$eta.sq.part = with(av, `Sum Sq`/(`Sum Sq` + `Sum Sq.res`))
+av
+art.con(m1D, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+#---------
+#Occupancy
+#---------
+data_O_SAM<- data %>% select(ResponseId,T.OB_Page.Submit,T.OF_Page.Submit,T.OA_Page.Submit,T.OS_Page.Submit, c(P.OB_1:A.OB),c(P.OF_1:A.OF),c(P.OA_1:A.OA),c(P.OS_1:A.OS),expectations_7,expectations_8,expectations_9,expectations_10)
+
+data_O_SAM <- data_O_SAM %>%
+    pivot_longer(
+        cols = c(P.OB_1,P.OB_2,P.OB_3,P.OF_1,P.OF_2,P.OF_3,P.OA_1,P.OA_2,P.OA_3,P.OA_4,P.OS_1,P.OS_2,P.OS_3),
+        names_to = c("Vignette", "Item"),
+        names_pattern = "P\\.(..)_([0-9])",
+        values_to = "Response"
+    ) %>% filter(!(Response=="")) %>%
+    mutate(Valence=case_when(Valence.OB_1=="On"~1, Valence.OB_2=="On"~2, Valence.OB_3=="On"~3, Valence.OB_4=="On"~4,Valence.OB_5=="On"~5,Valence.OB_6=="On"~6,Valence.OB_7=="On"~7,Valence.OB_8=="On"~8,Valence.OB_9=="On"~9, Valence.OF_1=="On"~1, Valence.OF_2=="On"~2, Valence.OF_3=="On"~3, Valence.OF_4=="On"~4,Valence.OF_5=="On"~5,Valence.OF_6=="On"~6,Valence.OF_7=="On"~7,Valence.OF_8=="On"~8,Valence.OF_9=="On"~9,Valence.OA_1=="On"~1, Valence.OA_2=="On"~2, Valence.OA_3=="On"~3, Valence.OA_4=="On"~4,Valence.OA_5=="On"~5,Valence.OA_6=="On"~6,Valence.OA_7=="On"~7,Valence.OA_8=="On"~8,Valence.OA_9=="On"~9,Valence.OS_1=="On"~1, Valence.OS_2=="On"~2, Valence.OS_3=="On"~3, Valence.OS_4=="On"~4,Valence.OS_5=="On"~5,Valence.OS_6=="On"~6,Valence.OS_7=="On"~7,Valence.OS_8=="On"~8,Valence.OS_9=="On"~9), Arousal=case_when(Arousal.OB_1=="On"~1, Arousal.OB_2=="On"~2, Arousal.OB_3=="On"~3, Arousal.OB_4=="On"~4,Arousal.OB_5=="On"~5,Arousal.OB_6=="On"~6,Arousal.OB_7=="On"~7,Arousal.OB_8=="On"~8,Arousal.OB_9=="On"~9, Arousal.OF_1=="On"~1, Arousal.OF_2=="On"~2, Arousal.OF_3=="On"~3, Arousal.OF_4=="On"~4,Arousal.OF_5=="On"~5,Arousal.OF_6=="On"~6,Arousal.OF_7=="On"~7,Arousal.OF_8=="On"~8,Arousal.OF_9=="On"~9,Arousal.OA_1=="On"~1, Arousal.OA_2=="On"~2, Arousal.OA_3=="On"~3, Arousal.OA_4=="On"~4,Arousal.OA_5=="On"~5,Arousal.OA_6=="On"~6,Arousal.OA_7=="On"~7,Arousal.OA_8=="On"~8,Arousal.OA_9=="On"~9,Arousal.OS_1=="On"~1, Arousal.OS_2=="On"~2, Arousal.OS_3=="On"~3, Arousal.OS_4=="On"~4,Arousal.OS_5=="On"~5,Arousal.OS_6=="On"~6,Arousal.OS_7=="On"~7,Arousal.OS_8=="On"~8,Arousal.OS_9=="On"~9), Dominance=case_when(Dominance.OB_1=="On"~1, Dominance.OB_2=="On"~2, Dominance.OB_3=="On"~3, Dominance.OB_4=="On"~4,Dominance.OB_5=="On"~5,Dominance.OB_6=="On"~6,Dominance.OB_7=="On"~7,Dominance.OB_8=="On"~8,Dominance.OB_9=="On"~9, Dominance.OF_1=="On"~1, Dominance.OF_2=="On"~2, Dominance.OF_3=="On"~3, Dominance.OF_4=="On"~4,Dominance.OF_5=="On"~5,Dominance.OF_6=="On"~6,Dominance.OF_7=="On"~7,Dominance.OF_8=="On"~8,Dominance.OF_9=="On"~9,Dominance.OA_1=="On"~1, Dominance.OA_2=="On"~2, Dominance.OA_3=="On"~3, Dominance.OA_4=="On"~4,Dominance.OA_5=="On"~5,Dominance.OA_6=="On"~6,Dominance.OA_7=="On"~7,Dominance.OA_8=="On"~8,Dominance.OA_9=="On"~9,Dominance.OS_1=="On"~1, Dominance.OS_2=="On"~2, Dominance.OS_3=="On"~3, Dominance.OS_4=="On"~4,Dominance.OS_5=="On"~5,Dominance.OS_6=="On"~6,Dominance.OS_7=="On"~7,Dominance.OS_8=="On"~8,Dominance.OS_9=="On"~9)) %>% select(ResponseId,Valence,Arousal,Dominance,Vignette) %>% unique()
+
+data_O_SAM$Vignette <- as.factor(data_O_SAM$Vignette)
+data_O_SAM$Valence <- data_O_SAM$Valence-5
+data_O_SAM$Arousal <- data_O_SAM$Arousal-5
+data_O_SAM$Dominance <- data_O_SAM$Dominance-5
+
+#---Decriptive
+data_O_SAM_descriptive <- data_O_SAM %>% group_by(Vignette) %>% summarise(M_Val=round(mean(Valence),1),Mdn_Val=round(median(Valence),1), SD_Val=round(sd(Valence),1),M_Aro=round(mean(Arousal),1),Mdn_Aro=round(median(Arousal),1), SD_Aro=round(sd(Arousal),1),M_Dom=round(mean(Dominance),1),Mdn_Dom=round(median(Dominance),1), SD_Dom=round(sd(Dominance),1))
+data_O_SAM_descriptive <- data.frame(data_O_SAM_descriptive)
+lvl_vig <- c("OB","OF","OA","OS")
+data_O_SAM_descriptive <- data_O_SAM_descriptive %>%
+    mutate(
+        Vignette  = fct_relevel(Vignette,  lvl_vig)
+    ) %>%
+    arrange(Vignette)
+data_O_SAM_descriptive
+
+#----Valence
+ggbetweenstats(data_O_SAM,Vignette,Valence,p.adjust.method = "holm", bf.message=F)
+
+m1V <- art(Valence ~ Vignette , data=filter(data_O_SAM))
+av<-anova(m1V)
+av$eta.sq.part = with(av, `Sum Sq`/(`Sum Sq` + `Sum Sq.res`))
+av
+art.con(m1V, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+#----Arousal
+ggbetweenstats(data_O_SAM,Vignette,Arousal,p.adjust.method = "holm", bf.message=F)
+m1A <- art(Arousal ~ Vignette , data=filter(data_O_SAM))
+av<-anova(m1A)
+av$eta.sq.part = with(av, `Sum Sq`/(`Sum Sq` + `Sum Sq.res`))
+av
+art.con(m1A, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+#----Dominance
+ggbetweenstats(data_O_SAM,Vignette,Dominance,p.adjust.method = "holm", bf.message=F)
+m1D <- art(Dominance ~ Vignette , data=filter(data_O_SAM))
+av<-anova(m1D)
+av$eta.sq.part = with(av, `Sum Sq`/(`Sum Sq` + `Sum Sq.res`))
+av
+art.con(m1D, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+#----
+#Exit
+#----
+data_X_SAM<- data %>% select(ResponseId,T.XB_Page.Submit,T.XF_Page.Submit,T.XA_Page.Submit,T.XS_Page.Submit, c(P.XB_1:A.XB),c(P.XF_1:A.XF),c(P.XA_1:A.XA),c(P.XS_1:A.XS),expectations_11,expectations_12,expectations_13,expectations_14,expectations_3,expectations_6 )
+
+data_X_SAM <- data_X_SAM %>%
+    pivot_longer(
+        cols = c(P.XB_1,P.XB_2,P.XB_3,P.XB_4,P.XF_1,P.XF_2,P.XF_3,P.XF_4,P.XA_1,P.XA_2,P.XA_3,P.XA_4,P.XS_1,P.XS_2,P.XS_3,P.XS_4),
+        names_to = c("Vignette", "Item"),
+        names_pattern = "P\\.(..)_([0-9])",
+        values_to = "Response"
+    ) %>% filter(!(Response=="")) %>%
+    mutate(Valence=case_when(Valence.XB_1=="On"~1, Valence.XB_2=="On"~2, Valence.XB_3=="On"~3, Valence.XB_4=="On"~4,Valence.XB_5=="On"~5,Valence.XB_6=="On"~6,Valence.XB_7=="On"~7,Valence.XB_8=="On"~8,Valence.XB_9=="On"~9, Valence.XF_1=="On"~1, Valence.XF_2=="On"~2, Valence.XF_3=="On"~3, Valence.XF_4=="On"~4,Valence.XF_5=="On"~5,Valence.XF_6=="On"~6,Valence.XF_7=="On"~7,Valence.XF_8=="On"~8,Valence.XF_9=="On"~9,Valence.XA_1=="On"~1, Valence.XA_2=="On"~2, Valence.XA_3=="On"~3, Valence.XA_4=="On"~4,Valence.XA_5=="On"~5,Valence.XA_6=="On"~6,Valence.XA_7=="On"~7,Valence.XA_8=="On"~8,Valence.XA_9=="On"~9,Valence.XS_1=="On"~1, Valence.XS_2=="On"~2, Valence.XS_3=="On"~3, Valence.XS_4=="On"~4,Valence.XS_5=="On"~5,Valence.XS_6=="On"~6,Valence.XS_7=="On"~7,Valence.XS_8=="On"~8,Valence.XS_9=="On"~9), Arousal=case_when(Arousal.XB_1=="On"~1, Arousal.XB_2=="On"~2, Arousal.XB_3=="On"~3, Arousal.XB_4=="On"~4,Arousal.XB_5=="On"~5,Arousal.XB_6=="On"~6,Arousal.XB_7=="On"~7,Arousal.XB_8=="On"~8,Arousal.XB_9=="On"~9, Arousal.XF_1=="On"~1, Arousal.XF_2=="On"~2, Arousal.XF_3=="On"~3, Arousal.XF_4=="On"~4,Arousal.XF_5=="On"~5,Arousal.XF_6=="On"~6,Arousal.XF_7=="On"~7,Arousal.XF_8=="On"~8,Arousal.XF_9=="On"~9,Arousal.XA_1=="On"~1, Arousal.XA_2=="On"~2, Arousal.XA_3=="On"~3, Arousal.XA_4=="On"~4,Arousal.XA_5=="On"~5,Arousal.XA_6=="On"~6,Arousal.XA_7=="On"~7,Arousal.XA_8=="On"~8,Arousal.XA_9=="On"~9,Arousal.XS_1=="On"~1, Arousal.XS_2=="On"~2, Arousal.XS_3=="On"~3, Arousal.XS_4=="On"~4,Arousal.XS_5=="On"~5,Arousal.XS_6=="On"~6,Arousal.XS_7=="On"~7,Arousal.XS_8=="On"~8,Arousal.XS_9=="On"~9), Dominance=case_when(Dominance.XB_1=="On"~1, Dominance.XB_2=="On"~2, Dominance.XB_3=="On"~3, Dominance.XB_4=="On"~4,Dominance.XB_5=="On"~5,Dominance.XB_6=="On"~6,Dominance.XB_7=="On"~7,Dominance.XB_8=="On"~8,Dominance.XB_9=="On"~9, Dominance.XF_1=="On"~1, Dominance.XF_2=="On"~2, Dominance.XF_3=="On"~3, Dominance.XF_4=="On"~4,Dominance.XF_5=="On"~5,Dominance.XF_6=="On"~6,Dominance.XF_7=="On"~7,Dominance.XF_8=="On"~8,Dominance.XF_9=="On"~9,Dominance.XA_1=="On"~1, Dominance.XA_2=="On"~2, Dominance.XA_3=="On"~3, Dominance.XA_4=="On"~4,Dominance.XA_5=="On"~5,Dominance.XA_6=="On"~6,Dominance.XA_7=="On"~7,Dominance.XA_8=="On"~8,Dominance.XA_9=="On"~9,Dominance.XS_1=="On"~1, Dominance.XS_2=="On"~2, Dominance.XS_3=="On"~3, Dominance.XS_4=="On"~4,Dominance.XS_5=="On"~5,Dominance.XS_6=="On"~6,Dominance.XS_7=="On"~7,Dominance.XS_8=="On"~8,Dominance.XS_9=="On"~9)) %>% select(ResponseId,Valence,Arousal,Dominance,Vignette) %>% unique()
+
+data_X_SAM$Vignette <- as.factor(data_X_SAM$Vignette)
+data_X_SAM$Valence <- data_X_SAM$Valence-5
+data_X_SAM$Arousal <- data_X_SAM$Arousal-5
+data_X_SAM$Dominance <- data_X_SAM$Dominance-5
+
+#---Decriptive
+data_X_SAM_descriptive <- data_X_SAM %>% group_by(Vignette) %>% summarise(M_Val=round(mean(Valence),1),Mdn_Val=round(median(Valence),1), SD_Val=round(sd(Valence),1),M_Aro=round(mean(Arousal),1),Mdn_Aro=round(median(Arousal),1), SD_Aro=round(sd(Arousal),1),M_Dom=round(mean(Dominance),1),Mdn_Dom=round(median(Dominance),1), SD_Dom=round(sd(Dominance),1))
+data_X_SAM_descriptive <- data.frame(data_X_SAM_descriptive)
+lvl_vig <- c("XB","XF","XA","XS")
+data_X_SAM_descriptive <- data_X_SAM_descriptive %>%
+    mutate(
+        Vignette  = fct_relevel(Vignette,  lvl_vig)
+    ) %>%
+    arrange(Vignette)
+data_X_SAM_descriptive
+
+#----Valence
+ggbetweenstats(data_X_SAM,Vignette,Valence,p.adjust.method = "holm", bf.message=F)
+
+m1V <- art(Valence ~ Vignette , data=filter(data_X_SAM))
+av<-anova(m1V)
+av$eta.sq.part = with(av, `Sum Sq`/(`Sum Sq` + `Sum Sq.res`))
+av
+art.con(m1V, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+#----Arousal
+ggbetweenstats(data_X_SAM,Vignette,Arousal,p.adjust.method = "holm", bf.message=F)
+m1A <- art(Arousal ~ Vignette , data=filter(data_X_SAM))
+av<-anova(m1A)
+av$eta.sq.part = with(av, `Sum Sq`/(`Sum Sq` + `Sum Sq.res`))
+av
+art.con(m1A, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+#----Dominance
+ggbetweenstats(data_X_SAM,Vignette,Dominance,p.adjust.method = "holm", bf.message=F)
+m1D <- art(Dominance ~ Vignette , data=filter(data_X_SAM))
+av<-anova(m1D)
+av$eta.sq.part = with(av, `Sum Sq`/(`Sum Sq` + `Sum Sq.res`))
+av
+art.con(m1D, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+```
+
+Behavior
+```{r}
+#Behavior
+
+#------
+#ENTRY
+#------
+data_E_Behavior <- data %>% select(c(ResponseId,c(P.EB_1:A.EB),c(P.EF_1:A.EF),c(P.EA_1:A.EA),c(P.ES_1:A.ES)))
+
+data_E_Behavior <- data_E_Behavior %>%
+    pivot_longer(
+        cols = c(B.EB_1,B.EB_2,B.EB_3,B.EB_4,B.EF_1,B.EF_2,B.EF_3,B.EF_4,B.EA_1,B.EA_2,B.EA_3,B.EA_4,B.ES_1,B.ES_2,B.ES_3,B.ES_4),
+        names_to = c("Vignette", "Item"),
+        names_pattern = "B\\.(..)_([0-9])",
+        values_to = "Response"
+    ) %>%
+    mutate(
+        B_Statement = case_when(
+            Item == "1" ~ "I would tell the robot that its behavior was inappropriate.",
+            Item == "2" ~ "I would take steps to prevent the robot from accessing my room again (e.g., locking the door).",
+            Item == "3" ~ "I would set clear rules or restrictions on the robot’s future behavior.",
+            Item == "4" ~ "I would talk to someone else to express that the robot misbehaved.",
+            TRUE ~ NA_character_
+        ),
+        Dimension = case_when(
+            Item == "1" ~ "Direct",
+            Item == "2" ~ "Block",
+            Item == "3" ~ "Rule",
+            Item == "4" ~ "Social",
+            TRUE ~ NA_character_),
+        val_Response = case_when(Response == "Very Unlikely" ~ -3, Response == "Unlikely" ~ -2, Response == "Somewhat unlikely" ~ -1, Response == "Neither likely nor unlikely" ~ 0, Response == "Somewhat likely" ~ 1, Response == "Likely" ~ 2, Response == "Very Likely" ~ 3)
+    )
+
+data_E_Behavior$Vignette <- as.factor(data_E_Behavior$Vignette)
+data_E_Behavior$Dimension <- as.factor(data_E_Behavior$Dimension)
+
+data_E_Behavior <- data_E_Behavior %>% filter(Response!="")
+
+#---Decriptive
+data_E_Behavior_descriptive <- data_E_Behavior %>% group_by(Vignette, Dimension) %>% summarise(M=round(mean(val_Response),1),Mdn=round(median(val_Response),1), SD=round(sd(val_Response),1))
+data_E_Behavior_descriptive <- data.frame(data_E_Behavior_descriptive)
+lvl_vig <- c("EB","EF","EA","ES")
+lvl_dim <- c("Direct","Block","Rule","Social")
+data_E_Behavior_descriptive <- data_E_Behavior_descriptive %>%
+    mutate(
+        Vignette  = fct_relevel(Vignette,  lvl_vig),
+        Dimension = fct_relevel(Dimension,  lvl_dim),
+    ) %>%
+    arrange(Vignette, Dimension)
+data_E_Behavior_descriptive
+
+#--- Direct
+m1P <- art(val_Response ~ Vignette, data=filter(data_E_Behavior, Dimension=="Direct"))
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+#--- Block
+m1P <- art(val_Response ~ Vignette, data=filter(data_E_Behavior, Dimension=="Block"))
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+#--- Rule
+m1P <- art(val_Response ~ Vignette, data=filter(data_E_Behavior, Dimension=="Rule"))
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+#--- Social
+m1P <- art(val_Response ~ Vignette, data=filter(data_E_Behavior, Dimension=="Social"))
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+#----------
+#Occupancy
+#---------
+data_O_Behavior <- data %>% select(c(ResponseId,c(P.OB_1:A.OB),c(P.OF_1:A.OF),c(P.OA_1:A.OA),c(P.OS_1:A.OS),expectations_7,expectations_8,expectations_9,expectations_10))
+
+data_O_Behavior <- data_O_Behavior %>%
+    pivot_longer(
+        cols = c(B.OB_1,B.OB_2,B.OB_3,B.OB_4,B.OF_1,B.OF_2,B.OF_3,B.OF_4,B.OA_1,B.OA_2,B.OA_3,B.OA_4,B.OS_1,B.OS_2,B.OS_3,B.OS_4),
+        names_to = c("Vignette", "Item"),
+        names_pattern = "B\\.(..)_([0-9])",
+        values_to = "Response"
+    ) %>%
+    mutate(
+        B_Statement = case_when(
+            Item == "1" ~ "I would tell the robot that its behavior was inappropriate.",
+            Item == "2" ~ "I would take steps to prevent the robot from accessing my room again (e.g., locking the door).",
+            Item == "3" ~ "I would set clear rules or restrictions on the robot’s future behavior.",
+            Item == "4" ~ "I would talk to someone else to express that the robot misbehaved.",
+            TRUE ~ NA_character_
+        ),
+        Dimension = case_when(
+            Item == "1" ~ "Direct",
+            Item == "2" ~ "Block",
+            Item == "3" ~ "Rule",
+            Item == "4" ~ "Social",
+            TRUE ~ NA_character_),
+        val_Response = case_when(Response == "Very Unlikely" ~ -3, Response == "Unlikely" ~ -2, Response == "Somewhat unlikely" ~ -1, Response == "Neither likely nor unlikely" ~ 0, Response == "Somewhat likely" ~ 1, Response == "Likely" ~ 2, Response == "Very Likely" ~ 3)
+    )
+
+data_O_Behavior$Vignette <- as.factor(data_O_Behavior$Vignette)
+data_O_Behavior$Dimension <- as.factor(data_O_Behavior$Dimension)
+
+data_O_Behavior <- data_O_Behavior %>% filter(Response!="")
+
+#---Decriptive
+data_O_Behavior_descriptive <- data_O_Behavior %>% group_by(Vignette, Dimension) %>% summarise(M=round(mean(val_Response),1),Mdn=round(median(val_Response),1), SD=round(sd(val_Response),1))
+data_O_Behavior_descriptive <- data.frame(data_O_Behavior_descriptive)
+lvl_vig <- c("OB","OF","OA","OS")
+lvl_dim <- c("Direct","Block","Rule","Social")
+data_O_Behavior_descriptive <- data_O_Behavior_descriptive %>%
+    mutate(
+        Vignette  = fct_relevel(Vignette,  lvl_vig),
+        Dimension = fct_relevel(Dimension,  lvl_dim),
+    ) %>%
+    arrange(Vignette, Dimension)
+data_O_Behavior_descriptive
+
+#--- Direct
+m1P <- art(val_Response ~ Vignette, data=filter(data_O_Behavior, Dimension=="Direct"))
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+#--- Block
+m1P <- art(val_Response ~ Vignette, data=filter(data_O_Behavior, Dimension=="Block"))
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+#--- Rule
+m1P <- art(val_Response ~ Vignette, data=filter(data_O_Behavior, Dimension=="Rule"))
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+#--- Social
+m1P <- art(val_Response ~ Vignette, data=filter(data_O_Behavior, Dimension=="Social"))
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+#-----
+#EXIT
+#-----
+data_X_Behavior <- data %>% select(c(ResponseId,c(P.XB_1:A.XB),c(P.XF_1:A.XF),c(P.XA_1:A.XA),c(P.XS_1:A.XS)))
+
+data_X_Behavior <- data_X_Behavior %>%
+    pivot_longer(
+        cols = c(B.XB_1,B.XB_2,B.XB_3,B.XB_4,B.XF_1,B.XF_2,B.XF_3,B.XF_4,B.XA_1,B.XA_2,B.XA_3,B.XA_4,B.XS_1,B.XS_2,B.XS_3,B.XS_4),
+        names_to = c("Vignette", "Item"),
+        names_pattern = "B\\.(..)_([0-9])",
+        values_to = "Response"
+    ) %>%
+    mutate(
+        B_Statement = case_when(
+            Item == "1" ~ "I would tell the robot that its behavior was inappropriate.",
+            Item == "2" ~ "I would take steps to prevent the robot from accessing my room again (e.g., locking the door).",
+            Item == "3" ~ "I would set clear rules or restrictions on the robot’s future behavior.",
+            Item == "4" ~ "I would talk to someone else to express that the robot misbehaved.",
+            TRUE ~ NA_character_
+        ),
+        Dimension = case_when(
+            Item == "1" ~ "Direct",
+            Item == "2" ~ "Block",
+            Item == "3" ~ "Rule",
+            Item == "4" ~ "Social",
+            TRUE ~ NA_character_),
+        val_Response = case_when(Response == "Very Unlikely" ~ -3, Response == "Unlikely" ~ -2, Response == "Somewhat unlikely" ~ -1, Response == "Neither likely nor unlikely" ~ 0, Response == "Somewhat likely" ~ 1, Response == "Likely" ~ 2, Response == "Very Likely" ~ 3)
+    )
+
+data_X_Behavior$Vignette <- as.factor(data_X_Behavior$Vignette)
+data_X_Behavior$Dimension <- as.factor(data_X_Behavior$Dimension)
+
+data_X_Behavior <- data_X_Behavior %>% filter(Response!="")
+
+#---Decriptive
+data_X_Behavior_descriptive <- data_X_Behavior %>% group_by(Vignette, Dimension) %>% summarise(M=round(mean(val_Response),1),Mdn=round(median(val_Response),1), SD=round(sd(val_Response),1))
+data_X_Behavior_descriptive <- data.frame(data_X_Behavior_descriptive)
+lvl_vig <- c("XB","XF","XA","XS")
+lvl_dim <- c("Direct","Block","Rule","Social")
+data_X_Behavior_descriptive <- data_X_Behavior_descriptive %>%
+    mutate(
+        Vignette  = fct_relevel(Vignette,  lvl_vig),
+        Dimension = fct_relevel(Dimension,  lvl_dim),
+    ) %>%
+    arrange(Vignette, Dimension)
+data_X_Behavior_descriptive
+
+#--- Direct
+m1P <- art(val_Response ~ Vignette, data=filter(data_X_Behavior, Dimension=="Direct"))
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+#--- Block
+m1P <- art(val_Response ~ Vignette, data=filter(data_X_Behavior, Dimension=="Block"))
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+#--- Rule
+m1P <- art(val_Response ~ Vignette, data=filter(data_X_Behavior, Dimension=="Rule"))
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+#--- Social
+m1P <- art(val_Response ~ Vignette, data=filter(data_X_Behavior, Dimension=="Social"))
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+```
+
+Appropriatness
+```{r}
+#-------
+# ENTRY
+#-------
+data_E_appro <- data %>% select(c(ResponseId,c(P.EB_1:A.EB),c(P.EF_1:A.EF),c(P.EA_1:A.EA),c(P.ES_1:A.ES)), A.General,P.OB_1,P.XB_1)
+
+
+data_E_appro <- data_E_appro %>%
+    pivot_longer(
+        cols = c(A.EB,A.EF,A.EA,A.ES),
+        names_to = c("Vignette"),
+        values_to = "Response"
+    ) %>%
+    mutate(
+        Condition= case_when((P.EB_1!="" & P.OB_1!="" & P.XB_1!="")~"Baseline", P.EF_1!=""~"EF", P.EA_1!=""~"EA",P.ES_1!=""~"ES"),
+        val_Response = case_when(Response == "Very inappropriate" ~ -3, Response == "Inappropriate" ~ -2, Response == "Somewhat inappropriate" ~ -1, Response == "Neither appropriate nor inappropriate" ~ 0, Response == "Somewhat appropriate" ~ 1, Response == "Appropriate" ~ 2, Response == "Very appropriate" ~ 3),
+        val_ResponseG = case_when(A.General == "Very inappropriate" ~ -3, A.General == "Inappropriate" ~ -2, A.General == "Somewhat inappropriate" ~ -1, A.General == "Neither appropriate nor inappropriate" ~ 0, A.General == "Somewhat appropriate" ~ 1, A.General == "Appropriate" ~ 2, A.General == "Very appropriate" ~ 3)
+    )
+
+data_E_appro$Vignette <- as.factor(data_E_appro$Vignette)
+data_E_appro$Condition <- as.factor(data_E_appro$Condition)
+data_E_appro <- data_E_appro %>% filter(Response!="")
+data_E_appro <- data_E_appro %>% select(c(Vignette, Response, val_Response, Condition, A.General, val_ResponseG))
+
+#---Decriptive - Vignette
+data_E_appro_descriptive <- data_E_appro %>% group_by(Vignette) %>% summarise(M=round(mean(val_Response),1),Mdn=round(median(val_Response),1), SD=round(sd(val_Response),1))
+data_E_appro_descriptive <- data.frame(data_E_appro_descriptive)
+lvl_vig <- c("A.EB","A.EF","A.EA","A.ES")
+data_E_appro_descriptive <- data_E_appro_descriptive %>%
+    mutate(
+        Vignette  = fct_relevel(Vignette,  lvl_vig)
+        ) %>%
+    arrange(Vignette)
+data_E_appro_descriptive
+
+m1P <- art(val_Response ~ Vignette, data=data_E_appro)
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+#---Decriptive - General
+data_E_approG_descriptive <- data_E_appro %>% group_by(Condition) %>% summarise(M=round(mean(val_ResponseG),1),Mdn=round(median(val_ResponseG),1), SD=round(sd(val_ResponseG),1))
+data_E_approG_descriptive <- data.frame(data_E_approG_descriptive)
+lvl_vig <- c("Baseline","EF","EA","ES")
+data_E_approG_descriptive <- data_E_approG_descriptive %>%
+    mutate(
+        Condition  = fct_relevel(Condition,  lvl_vig)
+        ) %>%
+    arrange(Condition)
+data_E_approG_descriptive
+
+m1P <- art(val_ResponseG ~ Condition, data=filter(data_E_appro, !is.na(Condition)))
+anova(m1P)
+art.con(m1P, ~ Condition, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+#----------
+# Occupancy
+#----------
+
+data_O_appro <- data %>% select(c(ResponseId,c(P.OB_1:A.OB),c(P.OF_1:A.OF),c(P.OA_1:A.OA),c(P.OS_1:A.OS)), A.General,P.EB_1,P.XB_1)
+
+
+data_O_appro <- data_O_appro %>%
+    pivot_longer(
+        cols = c(A.OB,A.OF,A.OA,A.OS),
+        names_to = c("Vignette"),
+        values_to = "Response"
+    ) %>%
+    mutate(
+        Condition= case_when((P.OB_1!="" & P.EB_1!="" & P.XB_1!="")~"Baseline", P.OF_1!=""~"OF", P.OA_1!=""~"OA",P.OS_1!=""~"OS"),
+        val_Response = case_when(Response == "Very inappropriate" ~ -3, Response == "Inappropriate" ~ -2, Response == "Somewhat inappropriate" ~ -1, Response == "Neither appropriate nor inappropriate" ~ 0, Response == "Somewhat appropriate" ~ 1, Response == "Appropriate" ~ 2, Response == "Very appropriate" ~ 3),
+        val_ResponseG = case_when(A.General == "Very inappropriate" ~ -3, A.General == "Inappropriate" ~ -2, A.General == "Somewhat inappropriate" ~ -1, A.General == "Neither appropriate nor inappropriate" ~ 0, A.General == "Somewhat appropriate" ~ 1, A.General == "Appropriate" ~ 2, A.General == "Very appropriate" ~ 3)
+    )
+
+data_O_appro$Vignette <- as.factor(data_O_appro$Vignette)
+data_O_appro$Condition <- as.factor(data_O_appro$Condition)
+data_O_appro <- data_O_appro %>% filter(Response!="")
+data_O_appro <- data_O_appro %>% select(c(Vignette, Response, val_Response, Condition, A.General, val_ResponseG))
+
+#---Decriptive - Vignette
+data_O_appro_descriptive <- data_O_appro %>% group_by(Vignette) %>% summarise(M=round(mean(val_Response),1),Mdn=round(median(val_Response),1), SD=round(sd(val_Response),1))
+data_O_appro_descriptive <- data.frame(data_O_appro_descriptive)
+lvl_vig <- c("A.OB","A.OF","A.OA","A.OS")
+data_O_appro_descriptive <- data_O_appro_descriptive %>%
+    mutate(
+        Vignette  = fct_relevel(Vignette,  lvl_vig)
+        ) %>%
+    arrange(Vignette)
+data_O_appro_descriptive
+
+m1P <- art(val_Response ~ Vignette, data=data_O_appro)
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+#---Decriptive - General
+data_O_approG_descriptive <- data_O_appro %>% group_by(Condition) %>% summarise(M=round(mean(val_ResponseG),1),Mdn=round(median(val_ResponseG),1), SD=round(sd(val_ResponseG),1))
+data_O_approG_descriptive <- data.frame(data_O_approG_descriptive)
+lvl_vig <- c("Baseline","OF","OA","OS")
+data_O_approG_descriptive <- data_O_approG_descriptive %>%
+    mutate(
+        Condition  = fct_relevel(Condition,  lvl_vig)
+        ) %>%
+    arrange(Condition)
+data_O_approG_descriptive
+
+m1P <- art(val_ResponseG ~ Condition, data=filter(data_O_appro, !is.na(Condition)))
+anova(m1P)
+art.con(m1P, ~ Condition, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+#-----
+# EXI
+#-----
+data_X_appro <- data %>% select(c(ResponseId,c(P.XB_1:A.XB),c(P.XF_1:A.XF),c(P.XA_1:A.XA),c(P.XS_1:A.XS)), A.General,P.EB_1,P.OB_1)
+
+
+data_X_appro <- data_X_appro %>%
+    pivot_longer(
+        cols = c(A.XB,A.XF,A.XA,A.XS),
+        names_to = c("Vignette"),
+        values_to = "Response"
+    ) %>%
+    mutate(
+        Condition= case_when((P.OB_1!="" & P.EB_1!="" & P.XB_1!="")~"Baseline", P.XF_1!=""~"XF", P.XA_1!=""~"XA",P.XS_1!=""~"XS"),
+        val_Response = case_when(Response == "Very inappropriate" ~ -3, Response == "Inappropriate" ~ -2, Response == "Somewhat inappropriate" ~ -1, Response == "Neither appropriate nor inappropriate" ~ 0, Response == "Somewhat appropriate" ~ 1, Response == "Appropriate" ~ 2, Response == "Very appropriate" ~ 3),
+        val_ResponseG = case_when(A.General == "Very inappropriate" ~ -3, A.General == "Inappropriate" ~ -2, A.General == "Somewhat inappropriate" ~ -1, A.General == "Neither appropriate nor inappropriate" ~ 0, A.General == "Somewhat appropriate" ~ 1, A.General == "Appropriate" ~ 2, A.General == "Very appropriate" ~ 3)
+    )
+
+data_X_appro$Vignette <- as.factor(data_X_appro$Vignette)
+data_X_appro$Condition <- as.factor(data_X_appro$Condition)
+data_X_appro <- data_X_appro %>% filter(Response!="")
+data_X_appro <- data_X_appro %>% select(c(Vignette, Response, val_Response, Condition, A.General, val_ResponseG))
+
+#---Decriptive - Vignette
+data_X_appro_descriptive <- data_X_appro %>% group_by(Vignette) %>% summarise(M=round(mean(val_Response),1),Mdn=round(median(val_Response),1), SD=round(sd(val_Response),1))
+data_X_appro_descriptive <- data.frame(data_X_appro_descriptive)
+lvl_vig <- c("A.XB","A.XF","A.XA","A.XS")
+data_X_appro_descriptive <- data_X_appro_descriptive %>%
+    mutate(
+        Vignette  = fct_relevel(Vignette,  lvl_vig)
+        ) %>%
+    arrange(Vignette)
+data_X_appro_descriptive
+
+m1P <- art(val_Response ~ Vignette, data=data_X_appro)
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+#---Decriptive - General
+data_X_approG_descriptive <- data_X_appro %>% group_by(Condition) %>% summarise(M=round(mean(val_ResponseG),1),Mdn=round(median(val_ResponseG),1), SD=round(sd(val_ResponseG),1))
+data_X_approG_descriptive <- data.frame(data_X_approG_descriptive)
+lvl_vig <- c("Baseline","XF","XA","XS")
+data_X_approG_descriptive <- data_X_approG_descriptive %>%
+    mutate(
+        Condition  = fct_relevel(Condition,  lvl_vig)
+        ) %>%
+    arrange(Condition)
+data_X_approG_descriptive
+
+m1P <- art(val_ResponseG ~ Condition, data=filter(data_X_appro, !is.na(Condition)))
+anova(m1P)
+art.con(m1P, ~ Condition, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+```
+
+Congruence (E, C, D)
+
+Occupancy
+```{r}
+#--------------
+#  OCCUPANCY
+#--------------
+
+#DATA PREPARATION
+#----------------
+data_O <- data %>% select(c(ResponseId,c(P.OB_1:A.OB),c(P.OF_1:A.OF),c(P.OA_1:A.OA),c(P.OS_1:A.OS),expectations_7,expectations_8,expectations_9,expectations_10))
+
+data_long_O <- data_O %>%
+    pivot_longer(
+        cols = c(P.OB_1,P.OB_2,P.OB_3,P.OF_1,P.OF_2,P.OF_3,P.OA_1,P.OA_2,P.OA_3,P.OA_4,P.OS_1,P.OS_2,P.OS_3),
+        names_to = c("Vignette", "Item"),
+        names_pattern = "P\\.(..)_([0-9])",
+        values_to = "Response"
+    ) %>%
+    mutate(
+        Per_Statement = case_when(
+            Item == "1" ~ "The robot handled personal or private items from my room without asking for permission.",
+            Item == "2" ~ "The robot only did tasks related to cleaning my room.",
+            (Item == "3" & Vignette!= "OA") ~ "The robot was in my way and physically blocked me from moving around.",
+            (Item == "3" & Vignette== "OA") ~ "The robot cooked in my bedroom.",
+            Item == "4" ~ "The robot was in my way and physically blocked me from moving around.",
+            TRUE ~ NA_character_
+        ),
+        Dimension = case_when(
+            Item == "1" ~ "Freedom of Action",
+            Item == "2" ~ "Intrisic Action (Cleaning)",
+            (Item == "3" & Vignette!= "OA") ~ "Status Alteration (Action)",
+            (Item == "3" & Vignette == "OA") ~ "Intrisic Action (Cooking)",
+            Item == "4" ~ "Status Alteration (Action)",
+            TRUE ~ NA_character_),
+        Exp_Statement = case_when(
+            Item == "1" ~ "The robot should check with me before handling personal or private items in my room (e.g., arranging, using, or throwing them away).",
+            Item == "2" ~ "The robot should only do things in my room that are related to the purpose for which it is there (e.g., cleaning if it came to clean).",
+            (Item == "3" & Vignette== "OA") ~ "The robot should be allowed to cook in my room.",
+            (Item == "3" & Vignette!= "OA") ~ "The robot’s presence and actions should not greatly limit my ability to move around in my room.",
+            Item == "4" ~ "The robot’s presence and actions should not greatly limit my ability to move around in my room.",
+            TRUE ~ NA_character_),
+        val_Response = case_when(Response == "Strongly disagree" ~ -3, Response == "Disagree" ~ -2, Response == "Somewhat disagree" ~ -1, Response == "Neither agree nor disagree" ~ 0, Response == "Somewhat agree" ~ 1, Response == "Agree" ~ 2, Response == "Strongly agree" ~ 3)
+    )
+
+data_long_O <- data_long_O %>% mutate(Exp=case_when(Item=="1"~expectations_7, Item == "2"~expectations_8, (Item == "3" & Vignette!= "OA")~expectations_10, (Item == "3" & Vignette == "OA") ~ expectations_9, (Item == "4") ~ expectations_10 ))
+data_long_O <- data_long_O %>% mutate(val_Exp= case_when(Exp == "Strongly disagree" ~ -3, Exp == "Disagree" ~ -2, Exp == "Somewhat disagree" ~ -1, Exp == "Neither agree nor disagree" ~ 0, Exp == "Somewhat agree" ~ 1, Exp == "Agree" ~ 2, Exp == "Strongly agree" ~ 3))
+
+data_long_O <- data_long_O %>% mutate(D= case_when( (Vignette == "OB" & Dimension=="Freedom of Action") ~ D.OB_1, (Vignette == "OB" & Dimension=="Status Alteration (Action)") ~ D.OB_3,(Vignette == "OB" & Dimension=="Intrisic Action (Cleaning)") ~ D.OB_2, (Vignette == "OF" & Dimension=="Freedom of Action") ~ D.OF_1, (Vignette == "OF" & Dimension=="Status Alteration (Action)") ~ D.OF_3, (Vignette == "OF" & Dimension=="Intrisic Action (Cleaning)") ~ D.OF_2,(Vignette == "OA" & Dimension=="Freedom of Action") ~ D.OA_1, (Vignette == "OA" & Dimension=="Status Alteration (Action)") ~ D.OA_3, (Vignette == "OA" & Dimension=="Intrisic Action (Cleaning)") ~ D.OA_2,(Vignette == "OS" & Dimension=="Freedom of Action") ~ D.OS_1, (Vignette == "OS" & Dimension=="Status Alteration (Action)") ~ D.OS_3, (Vignette == "OS" & Dimension=="Intrisic Action (Cleaning)") ~ D.OS_2))
+data_long_O <- data_long_O %>% mutate(D_val=case_when((D=="Much worse than expected" | D=="Much worse  than expected" )~ -3, (D=="Moderately worse" | D=="Moderately worse  than expected") ~ -2, (D=="Slightly worse" | D=="Slightly worse  than expected") ~ -1, D=="As I expected" ~ -0, (D=="Slightly better"|D=="Slightly better  than expected")~ 1, (D=="Moderately better"|D=="Moderately better  than expected")~ 2, (D=="Much better  than expected"|D=="Much better than expected")~ 3))
+
+data_art_O <- data_long_O
+data_art_O$Vignette <- as.factor(data_art_O$Vignette)
+data_art_O$ResponseId <- as.factor(data_art_O$ResponseId)
+data_art_O$Dimension <- as.factor(data_art_O$Dimension)
+ 
+data_art_O$val_Response[data_art_O$Per_Statement=="The robot handled personal or private items from my room without asking for permission."] <- -data_art_O$val_Response[data_art_O$Per_Statement=="The robot handled personal or private items from my room without asking for permission."]
+data_art_O$val_Response[data_art_O$Per_Statement=="The robot was in my way and physically blocked me from moving around."] <- -data_art_O$val_Response[data_art_O$Per_Statement=="The robot was in my way and physically blocked me from moving around."]
+data_art_O <- data_art_O %>% mutate("ΔE"= val_Response-val_Exp)
+data_art_O <- data_art_O %>% mutate(Congruence=case_when(val_Response*val_Exp<0 ~ "Incongruent", val_Response*val_Exp>=0 ~ "Congruent"))
+data_art_O <- data_art_O %>% mutate(is_congruent = as.integer(Congruence == "Congruent"))
+data_art_O$val_Response[data_art_O$Per_Statement=="The robot handled personal or private items from my room without asking for permission."] <- -data_art_O$val_Response[data_art_O$Per_Statement=="The robot handled personal or private items from my room without asking for permission."]
+data_art_O$val_Response[data_art_O$Per_Statement=="The robot was in my way and physically blocked me from moving around."] <- -data_art_O$val_Response[data_art_O$Per_Statement=="The robot was in my way and physically blocked me from moving around."]
+
+data_art_O <- data_art_O %>% filter(Response!="")
+```
+
+```{r}
+#--------------
+#  OCCUPANCY
+#--------------
+
+#DESCRIPTIVE ANALYSIS
+#--------------------
+#Check if the perception means/Congruence%/delta_exp are where they should be for each statement for each vignette
+table_data_O <- data_art_O %>% group_by(Dimension,Vignette) %>% summarise(M_Exp=round(mean(val_Exp),1), M=round(mean(val_Response),1),Mdn=median(val_Response), SD=round(sd(val_Response),1), "C"= round(mean(Congruence=="Congruent")*100),"ΔE_sd"=round(sd(ΔE),1), "ΔE"=round(mean(ΔE),1), "D"=round(mean(D_val),1), "D_sd"=round(sd(D_val),1))
+table_data_O <- data.frame(table_data_O)
+table_data_O
+
+lvl_dim <- c("Freedom of Action",
+             "Intrisic Action (Cleaning)",
+             "Status Alteration (Action)")
+lvl_vig <- c("OB","OF","OA","OS")
+
+table_data_ordered_O <- table_data_O %>%
+    mutate(
+        Dimension = fct_relevel(Dimension, lvl_dim),
+        Vignette  = fct_relevel(Vignette,  lvl_vig)
+    ) %>%
+    arrange(Dimension, Vignette)
+
+table_data_ordered_O %>% select(!c(M_Exp,Mdn, M,SD))
+```
+
+```{r}
+#----STATISTICAL ANALYSIS -- Vignette Effect
+
+#PERCEPTION sign diff between Vignettes?
+## Freedom of Action -- PERCEPTION 
+m1P <- art(val_Response ~ Vignette, data=filter(data_art_O, Dimension=="Freedom of Action"))
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+## Freedom of Access -- ΔE
+m1E <- art(ΔE ~ Vignette , data=filter(data_art_O, Dimension=="Freedom of Action"))
+anova(m1E)
+av<-anova(m1E)
+av$eta.sq.part = with(av, `Sum Sq`/(`Sum Sq` + `Sum Sq.res`))
+av
+art.con(m1E, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+## Freedom of Access -- D
+m1E <- art(D_val ~ Vignette, data=filter(data_art_O, Dimension=="Freedom of Action"))
+anova(m1E)
+av<-anova(m1E)
+av$eta.sq.part = with(av, `Sum Sq`/(`Sum Sq` + `Sum Sq.res`))
+av
+art.con(m1E, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+## Freedom of Access -- Congruence %
+m1C<-glm(is_congruent ~ Vignette ,
+      data = filter(data_art_O, Dimension=="Freedom of Action"), family = binomial)
+car::Anova(m1C, type = "III")  # LR χ², df, p for Vignette
+
+emm <- emmeans(m1C, ~ Vignette, type = "response")
+pairs(emm, adjust = "holm") 
+
+
+m1C<-glmer(is_congruent ~ Vignette ,
+      data = filter(data_art_O, Dimension=="Freedom of Action"), family = binomial)
+m0C <- update(m1C, . ~ 1 + (1|ResponseId))  # same random effect
+anova(m0C, m1C, test = "Chisq")
+# Post hocs as probabilities with multiplicity control
+emm <- emmeans(m1C, pairwise ~ Vignette, type = "response", adjust = "holm")
+emm$emmeans        # estimated congruence rates (probabilities) per vignette
+emm$contrasts      # pairwise differences, p-values (Holm-adjusted)
+
+#IF THE ONE ABOVE DOES NOT WORK 
+d <- subset(data_art, Dimension == "Entry Point")   # or "Entry Enacment"
+with(d, prop.table(table(Vignette, is_congruent), 1))
+mC_pen <- bglmer(
+    is_congruent ~ Vignette + (1|ResponseId),
+    data = d, family = binomial,
+    # more patient optimizer
+    control = glmerControl(optimizer = "nloptwrap", optCtrl = list(maxfun = 5e5))
+,
+    # weakly-informative priors to regularize separation
+    fixef.prior = normal(sd = 1.5),         # shrink big logits a bit
+    cov.prior   = wishart(df = 3, scale = diag(1))  # random-intercept prior
+)
+car::Anova(mC_pen, type = "III")  # Wald χ², df, p for Vignette
+
+emm <- emmeans(mC_pen, ~ Vignette, type = "response")
+pairs(emm, adjust = "holm") 
+```
+
+Exit
+```{r}
+#--------
+#  EXIT
+#--------
+
+#DATA PREPARATION
+#----------------
+data_X <- data%>% select(c(ResponseId,c(P.XB_1:A.XB),c(P.XF_1:A.XF),c(P.XA_1:A.XA),c(P.XS_1:A.XS),expectations_11,expectations_12,expectations_13,expectations_14,expectations_3,expectations_6 ))
+
+data_long_X <- data_X %>%
+    pivot_longer(
+        cols = c(P.XB_1,P.XB_2,P.XB_3,P.XB_4,P.XF_1,P.XF_2,P.XF_3,P.XF_4,P.XA_1,P.XA_2,P.XA_3,P.XA_4,P.XS_1,P.XS_2,P.XS_3,P.XS_4),
+        names_to = c("Vignette", "Item"),
+        names_pattern = "P\\.(..)_([0-9])",
+        values_to = "Response"
+    ) %>%
+    mutate(
+        Per_Statement = case_when(
+            Item == "1" ~ "The robot checked with me before leaving the room.",
+            (Item == "2" & Vignette!= "XA") ~ "The robot left via the doorway.",
+            (Item == "3" & Vignette!= "XA") ~ "The robot used and moved through the doorway in the same way a human would",
+            (Item == "2" & Vignette== "XA") ~ "The robot left via the open window.",
+            (Item == "3" & Vignette== "XA") ~ "The robot passed via the window calmly and without causing disruption.",
+            Item == "4" ~ "The robot went against a decision or request I explicitly made.",
+            TRUE ~ NA_character_
+        ),
+        Dimension = case_when(
+            Item == "1" ~ "Freedom of Exit",
+            Item == "2" ~ "Exit Point",
+            Item == "3" ~ "Exit Enacment",
+            Item == "4" ~ "Status Alteration (Authority)",
+            TRUE ~ NA_character_),
+        Exp_Statement = case_when(
+            Item == "1" ~ "The robot should check with me before leaving if it hasn’t finished the task or leaves things behind (i.e., explain why or ask for my permission).",
+            (Item == "2" & Vignette!= "XA") ~ "If the robot leaves, it should exit via the doorway.",
+            (Item == "3" & Vignette!= "XA") ~ "If the robot passes via the doorway, it should use and move through the door in the same way a human would (e.g., using the handle, opening or closing it calmly).",
+            (Item == "2" & Vignette== "XA") ~ "The robot should be allowed to exit my room through the window.",
+            (Item == "3" & Vignette== "XA") ~ "If the robot passes via the window, it should do so calmly and without causing disruption.",
+            Item == "4" ~ "The robot should respect my decision about whether it can enter when I explicitly tell it yes or no.",
+            TRUE ~ NA_character_),
+        val_Response = case_when(Response == "Strongly disagree" ~ -3, Response == "Disagree" ~ -2, Response == "Somewhat disagree" ~ -1, Response == "Neither agree nor disagree" ~ 0, Response == "Somewhat agree" ~ 1, Response == "Agree" ~ 2, Response == "Strongly agree" ~ 3)
+    )
+
+
+data_long_X <- data_long_X %>% mutate(Exp=case_when(Item=="1"~expectations_14, (Item == "2" & Vignette!= "XA")~expectations_11, (Item == "3" & Vignette!= "XA")~expectations_3, (Item == "2" & Vignette == "XA") ~ expectations_13, (Item == "3" & Vignette == "XA")~expectations_6, Item=="4"~expectations_12))
+data_long_X <- data_long_X %>% mutate(val_Exp= case_when(Exp == "Strongly disagree" ~ -3, Exp == "Disagree" ~ -2, Exp == "Somewhat disagree" ~ -1, Exp == "Neither agree nor disagree" ~ 0, Exp == "Somewhat agree" ~ 1, Exp == "Agree" ~ 2, Exp == "Strongly agree" ~ 3))
+
+
+data_long_X <- data_long_X %>% mutate(D= case_when( (Vignette == "XB" & Dimension=="Freedom of Exit") ~ D.XB_1, (Vignette == "XB" & Dimension=="Exit Point") ~ D.XB_3, (Vignette == "XB" & Dimension=="Exit Enacment") ~ D.XB_4, (Vignette == "XB" & Dimension=="Status Alteration (Authority)") ~ D.XB_2, (Vignette == "XF" & Dimension=="Freedom of Exit") ~ D.XF_1, (Vignette == "XF" & Dimension=="Exit Point") ~ D.XF_3, (Vignette == "XF" & Dimension=="Exit Enacment") ~ D.XF_4, (Vignette == "XF" & Dimension=="Status Alteration (Authority)") ~ D.XF_2,(Vignette == "XA" & Dimension=="Freedom of Exit") ~ D.XA_1, (Vignette == "XA" & Dimension=="Exit Point") ~ D.XA_3, (Vignette == "XA" & Dimension=="Exit Enacment") ~ D.XA_4, (Vignette == "XA" & Dimension=="Status Alteration (Authority)") ~ D.XA_2,(Vignette == "XS" & Dimension=="Freedom of Exit") ~ D.XS_1, (Vignette == "XS" & Dimension=="Exit Point") ~ D.XS_3, (Vignette == "XS" & Dimension=="Exit Enacment") ~ D.XS_4, (Vignette == "XS" & Dimension=="Status Alteration (Authority)") ~ D.XS_2))
+data_long_X <- data_long_X %>% mutate(D_val=case_when(D=="Much worse than expected"~ -3, D=="Moderately worse"~ -2, D=="Slightly worse"~ -1, D=="As I expected"~ -0, D=="Slightly better"~ 1, D=="Moderately better"~ 2, D=="Much better than expected"~ 3))
+
+
+data_art_X <- data_long_X
+data_art_X$Vignette <- as.factor(data_art_X$Vignette)
+data_art_X$ResponseId <- as.factor(data_art_X$ResponseId)
+data_art_X$Dimension <- as.factor(data_art_X$Dimension)
+ 
+data_art_X$val_Response[data_art_X$Per_Statement=="The robot went against a decision or request I explicitly made."] <- -data_art_X$val_Response[data_art_X$Per_Statement=="The robot went against a decision or request I explicitly made."]
+data_art_X <- data_art_X %>% mutate("ΔE"= val_Response-val_Exp)
+data_art_X <- data_art_X %>% mutate(Congruence=case_when(val_Response*val_Exp<0 ~ "Incongruent", val_Response*val_Exp>=0 ~ "Congruent"))
+data_art_X <- data_art_X %>% mutate(is_congruent = as.integer(Congruence == "Congruent"))
+data_art_X$val_Response[data_art_X$Per_Statement=="The robot went against a decision or request I explicitly made."] <- -data_art_X$val_Response[data_art_X$Per_Statement=="The robot went against a decision or request I explicitly made."]
+
+
+data_art_X <- data_art_X %>% filter(Response!="")
+```
+
+```{r}
+#--------
+#  EXIT
+#--------
+
+#----DESCRIPTIVE ANALYSIS
+#Check if the perception means/Congruence%/delta_exp are where they should be for each statement for each vignette
+table_data_X <- data_art_X %>% group_by(Dimension,Vignette) %>% summarise(M_Exp=round(mean(val_Exp),1), M=round(mean(val_Response),1),Mdn=median(val_Response), SD=round(sd(val_Response),1), "C"= round(mean(Congruence=="Congruent")*100),"ΔE_sd"=round(sd(ΔE),1), "ΔE"=round(mean(ΔE),1), "D"=round(mean(D_val),1), "D_sd"=round(sd(D_val),1))
+table_data_X <- data.frame(table_data_X)
+table_data_X
+
+lvl_dim <- c("Freedom of Exit",
+             "Exit Point",
+             "Exit Enacment",
+             "Status Alteration (Authority)")
+lvl_vig <- c("XB","XF","XA","XS")
+
+table_data_ordered_X <- table_data_X %>%
+    mutate(
+        Dimension = fct_relevel(Dimension, lvl_dim),
+        Vignette  = fct_relevel(Vignette,  lvl_vig)
+    ) %>%
+    arrange(Dimension, Vignette)
+
+table_data_ordered_X %>% select(!c(M, SD, M_Exp,Mdn))
+```
+
+```{r}
+#----STATISTICAL ANALYSIS -- Vignette Effect
+
+#PERCEPTION sign diff between Vignettes?
+## Freedom of Access -- PERCEPTION 
+m1P <- art(val_Response ~ Vignette, data=filter(data_art_X, Dimension=="Freedom of Exit"))
+anova(m1P)
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+## Freedom of Access -- ΔE
+m1E <- art(ΔE ~ Vignette , data=filter(data_art_X, Dimension=="Freedom of Exit"))
+av<-anova(m1E)
+av$eta.sq.part = with(av, `Sum Sq`/(`Sum Sq` + `Sum Sq.res`))
+av
+art.con(m1E, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+## Freedom of Access -- D
+m1D <- art(D_val ~ Vignette , data=filter(data_art_X, Dimension=="Freedom of Exit"))
+av<-anova(m1D)
+av$eta.sq.part = with(av, `Sum Sq`/(`Sum Sq` + `Sum Sq.res`))
+av
+art.con(m1D, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+## Freedom of Access -- Congruence %
+m1C<-glm(is_congruent ~ Vignette ,
+         data = filter(data_art_X, Dimension=="Freedom of Exit"), family = binomial)
+car::Anova(m1C, type = "III")
+
+emm <- emmeans(m1C, ~ Vignette, type = "response")
+pairs(emm, adjust = "holm")
+
+mC_firth <- logistf(
+  is_congruent ~ Vignette,
+  data = filter(data_art_X, Dimension=="Exit Point")
+)
+
+summary(mC_firth)
+
+
+```
+
+Entry
+```{r}
+#-----------
+#  ENTRY
+#-----------
+
+#DATA PREPARATION
+#----------------
+
+data_E <- data %>% select(c(ResponseId,c(P.EB_1:A.EB),c(P.EF_1:A.EF),c(P.EA_1:A.EA),c(P.ES_1:A.ES),expectations_1,expectations_2,expectations_3,expectations_4,expectations_5,expectations_6))
+
+data_long <- data_E %>%
+    pivot_longer(
+        cols = c(P.EB_1,P.EB_2,P.EB_3,P.EB_4,P.EF_1,P.EF_2,P.EF_3,P.EF_4,P.EA_1,P.EA_2,P.EA_3,P.EA_4,P.ES_1,P.ES_2,P.ES_3,P.ES_4),
+        names_to = c("Vignette", "Item"),
+        names_pattern = "P\\.(..)_([0-9])",
+        values_to = "Response"
+    ) %>%
+    mutate(
+        Per_Statement = case_when(
+            Item == "1" ~ "The robot asked me for permission before entering my room.",
+            (Item == "2" & Vignette!= "EA") ~ "The robot entered via the doorway.",
+            (Item == "3" & Vignette!= "EA") ~ "The robot used and moved through the doorway in the same way a human would.",
+            (Item == "2" & Vignette== "EA") ~ "The robot entered via the open window.",
+            (Item == "3" & Vignette== "EA") ~ "The robot passed via the window calmly and without causing disruption.",
+            Item == "4" ~ "The robot went against a decision or request I explicitly made.",
+            TRUE ~ NA_character_
+        ),
+        Dimension = case_when(
+            Item == "1" ~ "Freedom of Access",
+            Item == "2" ~ "Entry Point",
+            Item == "3" ~ "Entry Enacment",
+            Item == "4" ~ "Status Alteration (Authority)",
+            TRUE ~ NA_character_),
+        Exp_Statement = case_when(
+            Item == "1" ~ "The robot should ask me for permission before entering my room when the door is closed.",
+            (Item == "2" & Vignette!= "EA") ~ "If the robot enters, it should use the doorway to access my room.",
+            (Item == "3" & Vignette!= "EA") ~ "If the robot passes via the doorway, it should use and move through the door in the same way a human would (e.g., using the handle, opening or closing it calmly).",
+            (Item == "2" & Vignette== "EA") ~ "The robot should be allowed to enter my room through the window.",
+            (Item == "3" & Vignette== "EA") ~ "If the robot passes via the window, it should do so calmly and without causing disruption.",
+            Item == "4" ~ "The robot should respect my decision about whether it can enter when I explicitly tell it yes or no.",
+            TRUE ~ NA_character_),
+        val_Response = case_when(Response == "Strongly disagree" ~ -3, Response == "Disagree" ~ -2, Response == "Somewhat disagree" ~ -1, Response == "Neither agree nor disagree" ~ 0, Response == "Somewhat agree" ~ 1, Response == "Agree" ~ 2, Response == "Strongly agree" ~ 3)
+    )
+
+data_long <- data_long %>% mutate( Exp=case_when(Item=="1"~expectations_1, (Item == "2" & Vignette!= "EA")~expectations_2, (Item == "3" & Vignette!= "EA")~expectations_3, (Item == "2" & Vignette == "EA") ~ expectations_5, (Item == "3" & Vignette == "EA")~expectations_6, Item=="4"~expectations_4))
+data_long <- data_long %>% mutate(val_Exp= case_when(Exp == "Strongly disagree" ~ -3, Exp == "Disagree" ~ -2, Exp == "Somewhat disagree" ~ -1, Exp == "Neither agree nor disagree" ~ 0, Exp == "Somewhat agree" ~ 1, Exp == "Agree" ~ 2, Exp == "Strongly agree" ~ 3))
+
+data_long <- data_long %>% mutate(D= case_when( (Vignette == "EB" & Dimension=="Freedom of Access") ~ D.EB_1, (Vignette == "EB" & Dimension=="Entry Point") ~ D.EB_3, (Vignette == "EB" & Dimension=="Entry Enacment") ~ D.EB_4, (Vignette == "EB" & Dimension=="Status Alteration (Authority)") ~ D.EB_2, (Vignette == "EF" & Dimension=="Freedom of Access") ~ D.EF_1, (Vignette == "EF" & Dimension=="Entry Point") ~ D.EF_3, (Vignette == "EF" & Dimension=="Entry Enacment") ~ D.EF_4, (Vignette == "EF" & Dimension=="Status Alteration (Authority)") ~ D.EF_2,(Vignette == "EA" & Dimension=="Freedom of Access") ~ D.EA_1, (Vignette == "EA" & Dimension=="Entry Point") ~ D.EA_3, (Vignette == "EA" & Dimension=="Entry Enacment") ~ D.EA_4, (Vignette == "EA" & Dimension=="Status Alteration (Authority)") ~ D.EA_2,(Vignette == "ES" & Dimension=="Freedom of Access") ~ D.ES_1, (Vignette == "ES" & Dimension=="Entry Point") ~ D.ES_3, (Vignette == "ES" & Dimension=="Entry Enacment") ~ D.ES_4, (Vignette == "ES" & Dimension=="Status Alteration (Authority)") ~ D.ES_2))
+data_long <- data_long %>% mutate(D_val=case_when(D=="Much worse than expected"~ -3, D=="Moderately worse"~ -2, D=="Slightly worse"~ -1, D=="As I expected"~ -0, D=="Slightly better"~ 1, D=="Moderately better"~ 2, D=="Much better than expected"~ 3))
+
+data_art <- data_long
+data_art$Vignette <- as.factor(data_art$Vignette)
+data_art$ResponseId <- as.factor(data_art$ResponseId)
+data_art$Dimension <- as.factor(data_art$Dimension)
+ 
+data_art$val_Response[data_art$Per_Statement=="The robot went against a decision or request I explicitly made."] <- -data_art$val_Response[data_art$Per_Statement=="The robot went against a decision or request I explicitly made."]
+data_art <- data_art %>% mutate("ΔE"= val_Response-val_Exp)
+data_art <- data_art %>% mutate(Congruence=case_when(val_Response*val_Exp<0 ~ "Incongruent", val_Response*val_Exp>=0 ~ "Congruent"))
+data_art <- data_art %>% mutate(is_congruent = as.integer(Congruence == "Congruent"))
+data_art$val_Response[data_art$Per_Statement=="The robot went against a decision or request I explicitly made."] <- -data_art$val_Response[data_art$Per_Statement=="The robot went against a decision or request I explicitly made."]
+
+
+data_art <- data_art %>% filter(Response!="")
+```
+
+```{r}
+#-----------
+#  ENTRY
+#-----------
+
+#----DESCRIPTIVE ANALYSIS
+#Check if the perception means/Congruence%/delta_exp are where they should be for each statement for each vignette
+#table_data <- data_art %>% group_by(Dimension,Vignette) %>% summarise(M_Exp=round(mean(val_Exp),1), M=round(mean(val_Response),1),Mdn=median(val_Response), SD=round(sd(val_Response),1), "C"= round(mean(Congruence=="Congruent")*100), "ΔE"=round(mean(ΔE),1))
+#table_data <- data.frame(table_data)
+#table_data %>% select(!c(M_Exp,Mdn))
+
+table_data <- data_art %>% group_by(Dimension,Vignette) %>% summarise(M_Exp=round(mean(val_Exp),1), M=round(mean(val_Response),1),Mdn=median(val_Response), SD=round(sd(val_Response),1), "C"= round(mean(Congruence=="Congruent")*100),E_sd=round(sd(ΔE),1), "ΔE"=round(mean(ΔE),1),"D"=round(mean(D_val),1), "D_sd"=round(sd(D_val),1))
+table_data <- data.frame(table_data)
+
+lvl_dim <- c("Freedom of Access",
+             "Entry Point",
+             "Entry Enacment",
+             "Status Alteration (Authority)")
+lvl_vig <- c("EB","EF","EA","ES")
+
+table_data_ordered <- table_data %>%
+    mutate(
+        Dimension = fct_relevel(Dimension, lvl_dim),
+        Vignette  = fct_relevel(Vignette,  lvl_vig)
+    ) %>%
+    arrange(Dimension, Vignette)
+
+table_data_ordered %>% select(!c(M,Mdn, SD, M_Exp,Mdn))
+```
+
+```{r}
+#----STATISTICAL ANALYSIS -- Vignette Effect
+
+#PERCEPTION sign diff between Vignettes?
+## Freedom of Access -- PERCEPTION 
+m1P <- art(val_Response ~ Vignette, data=filter(data_art, Dimension=="Freedom of Access"))
+av<-anova(m1P)
+av$eta.sq.part = with(av, `Sum Sq`/(`Sum Sq` + `Sum Sq.res`))
+av
+art.con(m1P, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+## Freedom of Access -- ΔE
+m1E <- art(ΔE ~ Vignette , data=filter(data_art, Dimension=="Freedom of Access"))
+anova(m1E)
+av<-anova(m1E)
+av$eta.sq.part = with(av, `Sum Sq`/(`Sum Sq` + `Sum Sq.res`))
+av
+art.con(m1E, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+## Freedom of Access -- D
+m1D <- art(D_val ~ Vignette , data=filter(data_art, Dimension=="Freedom of Access"))
+anova(m1D)
+av<-anova(m1D)
+av$eta.sq.part = with(av, `Sum Sq`/(`Sum Sq` + `Sum Sq.res`))
+av
+art.con(m1D, ~ Vignette, adjust="holm") %>% 
+		  summary() %>%
+		  mutate(sig. = symnum(p.value, corr=FALSE, na=FALSE,
+		                       cutpoints = c(0, .001, .01, .05, .10, 1),
+		                       symbols = c("***", "**", "*", ".", " ")))
+
+## Freedom of Access -- Congruence %
+m1C<-glm(is_congruent ~ Vignette ,
+         data = filter(data_art, Dimension=="Freedom of Access"), family = binomial)
+car::Anova(m1C, type = "III")  # Wald χ², df, p for Vignette
+
+emm <- emmeans(m1C, ~ Vignette, type = "response")
+pairs(emm, adjust = "holm") 
+
+mC_pen <- bglmer(
+  is_congruent ~ Vignette,
+  data = filter(data_art, Dimension=="Freedom of Access"),
+  family = binomial,
+  control = glmerControl(
+    optimizer = "nloptwrap", 
+    optCtrl = list(maxfun = 5e5)
+  ),
+  # priors to handle separation
+  fixef.prior = normal(sd = 1.5)
+)
+car::Anova(mC_pen, type = "III")
+emm <- emmeans(mC_pen, ~ Vignette, type = "response")
+# get estimated probabilities (on response scale)
+summary(emm)
+# pairwise contrasts with odds ratios
+pairs(emm, adjust = "holm")
+
+library(logistf)
+
+mC_firth <- logistf(
+  is_congruent ~ Vignette,
+  data = filter(data_art, Dimension=="Freedom of Access")
+)
+
+summary(mC_firth)
+
+```
+
